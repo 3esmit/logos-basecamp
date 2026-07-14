@@ -2,7 +2,12 @@
 
 ## Download
 
-Prebuilt binaries are available for Linux (AppImage) and macOS (DMG) from the [latest release](https://github.com/logos-co/logos-basecamp/releases/latest).
+Prebuilt binaries for Linux (AppImage) and macOS (DMG):
+
+- **Stable release** — [latest release](https://github.com/logos-co/logos-basecamp/releases/latest)
+- **Latest RC / development build** — [all releases](https://github.com/logos-co/logos-basecamp/releases)
+
+Release candidates are marked as pre-release, so `/releases/latest` skips them. If the stable release is significantly older than the RCs on the releases page, you probably want an RC.
 
 ## How to Build
 
