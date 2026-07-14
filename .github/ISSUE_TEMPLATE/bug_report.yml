@@ -1,0 +1,55 @@
+name: Bug report
+description: Something is broken or behaving unexpectedly in Logos Basecamp.
+title: "bug: <short summary>"
+labels: ["bug", "triage"]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: Basecamp version
+      description: See `Settings → About`, or the `VERSION` file if built from source. For dev builds, paste the commit SHA.
+      placeholder: "0.2.0-RC4 (or commit abc1234)"
+    validations:
+      required: true
+  - type: dropdown
+    id: build-type
+    attributes:
+      label: Build type
+      options:
+        - Linux AppImage (release)
+        - Linux Nix build
+        - macOS DMG (release)
+        - macOS Nix build
+        - Other (specify below)
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Linux (x86_64)
+        - Linux (aarch64)
+        - macOS (Intel)
+        - macOS (Apple Silicon)
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened + steps to reproduce
+      description: What you did, what you expected, what you got. Numbered steps if possible. Attach screenshots/recordings for UI issues.
+      placeholder: |
+        1. Launch Basecamp
+        2. Open Package Manager
+        3. Install "foo"
+        4. Second install crashes the app
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / stderr
+      description: |
+        Launch from a terminal to capture stderr. Logs also under `~/.local/share/Logos/LogosBasecampDev/logs/` (Linux) or `~/Library/Application Support/Logos/LogosBasecampDev/logs/` (macOS).
+      render: shell

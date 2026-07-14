@@ -1,0 +1,33 @@
+name: Feature request
+description: Propose a new capability or a change to existing behaviour.
+title: "feat: <short summary>"
+labels: ["enhancement", "triage"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What are you trying to do that Basecamp doesn't support well today? Focus on the user need, not the solution.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What should Basecamp do? Mockups welcome, not required.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Shell / sidebar / navigation
+        - Package Manager UI
+        - Module lifecycle (load/unload/upgrade)
+        - Settings
+        - Build / packaging / release
+        - Developer experience
+        - Other
+    validations:
+      required: true
