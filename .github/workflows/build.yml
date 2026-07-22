@@ -5,6 +5,7 @@ on:
     branches:
       - master
       - 'release/**'
+      - chore/add-remaining-tests-ci
   pull_request:
     branches: [master]
 
@@ -129,6 +130,15 @@ jobs:
           inputs-from: "."
           token: ${{ github.ref == 'refs/heads/master' && secrets.ATTIC_TOKEN_PUBLIC || secrets.ATTIC_TOKEN_CI }}
 
+      - name: Unit tests
+        run: nix build .#unit-tests -L
+
+      - name: QML tests
+        run: nix build .#qml-tests -L
+
+      - name: Sandbox test
+        run: nix build .#sandbox-test -L
+
       - name: Integration test (UI tests)
         run: nix build .#integration-test -L
 
@@ -152,6 +162,15 @@ jobs:
           cache: ${{ env.ATTIC_CACHE }}
           inputs-from: "."
           token: ${{ github.ref == 'refs/heads/master' && secrets.ATTIC_TOKEN_PUBLIC || secrets.ATTIC_TOKEN_CI }}
+
+      - name: Unit tests
+        run: nix build .#unit-tests -L
+
+      - name: QML tests
+        run: nix build .#qml-tests -L
+
+      - name: Sandbox test
+        run: nix build .#sandbox-test -L
 
       - name: Integration test (UI tests)
         run: nix build .#integration-test-bundle -L
