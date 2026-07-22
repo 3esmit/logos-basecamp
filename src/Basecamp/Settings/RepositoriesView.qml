@@ -30,6 +30,7 @@ Item {
         id: d
         property string newRepoUrl: ""
         property string lastError: ""
+        property string pendingRemoveUrl: ""
     }
 
     ScrollView {
@@ -107,6 +108,53 @@ Item {
                         onClicked: d.lastError = ""
                     }
                 }
+            }
+
+            // Add a repository form.
+            ColumnLayout {
+                Layout.fillWidth: true
+                spacing: Theme.spacing.small
+
+                LogosText {
+                    text: qsTr("Add a repository")
+                    font.pixelSize: Theme.typography.subtitleText
+                    font.weight: Theme.typography.weightMedium
+                    color: Theme.palette.text
+                }
+                LogosText {
+                    text: qsTr("Paste the URL of a logos-repo.json index.")
+                    font.pixelSize: Theme.typography.secondaryText
+                    color: Theme.palette.textTertiary
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    Layout.topMargin: Theme.spacing.tiny
+                    spacing: Theme.spacing.small
+
+                    LogosTextField {
+                        id: urlInput
+                        Layout.fillWidth: true
+                        placeholderText: qsTr("https://example.com/logos-repo.json")
+                        text: d.newRepoUrl
+                        onTextChanged: if (text !== d.newRepoUrl) d.newRepoUrl = text
+                    }
+                    LogosButton {
+                        text: qsTr("Add")
+                        enabled: d.newRepoUrl.trim().length > 0
+                        implicitWidth: 100
+                        implicitHeight: 40
+                        onClicked: root.addRequested(d.newRepoUrl.trim())
+                    }
+                }
+            }
+
+            // Divider below the add form.
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.bottomMargin: Theme.spacing.medium
+                Layout.preferredHeight: 1
+                color: Theme.palette.borderSubtle
             }
 
             // Repository list.
@@ -219,11 +267,17 @@ Item {
                             Item { Layout.fillWidth: true }
 
                             LogosButton {
-                                visible: !isDefault
                                 text: qsTr("Remove")
                                 implicitWidth: 100
                                 implicitHeight: 32
-                                onClicked: root.removeRequested(url)
+                                onClicked: {
+                                    if (isDefault) {
+                                        d.pendingRemoveUrl = url
+                                        removeDefaultDialog.open()
+                                    } else {
+                                        root.removeRequested(url)
+                                    }
+                                }
                             }
                         }
                     }
@@ -241,53 +295,45 @@ Item {
                 font.pixelSize: Theme.typography.secondaryText
             }
 
-            // Divider above the add form.
-            Rectangle {
-                Layout.fillWidth: true
-                Layout.topMargin: Theme.spacing.medium
-                Layout.preferredHeight: 1
-                color: Theme.palette.borderSubtle
-            }
-
-            ColumnLayout {
-                Layout.fillWidth: true
-                spacing: Theme.spacing.small
-
-                LogosText {
-                    text: qsTr("Add a repository")
-                    font.pixelSize: Theme.typography.subtitleText
-                    font.weight: Theme.typography.weightMedium
-                    color: Theme.palette.text
-                }
-                LogosText {
-                    text: qsTr("Paste the URL of a logos-repo.json index.")
-                    font.pixelSize: Theme.typography.secondaryText
-                    color: Theme.palette.textTertiary
-                }
-
-                RowLayout {
-                    Layout.fillWidth: true
-                    Layout.topMargin: Theme.spacing.tiny
-                    spacing: Theme.spacing.small
-
-                    LogosTextField {
-                        id: urlInput
-                        Layout.fillWidth: true
-                        placeholderText: qsTr("https://example.com/logos-repo.json")
-                        text: d.newRepoUrl
-                        onTextChanged: if (text !== d.newRepoUrl) d.newRepoUrl = text
-                    }
-                    LogosButton {
-                        text: qsTr("Add")
-                        enabled: d.newRepoUrl.trim().length > 0
-                        implicitWidth: 100
-                        implicitHeight: 40
-                        onClicked: root.addRequested(d.newRepoUrl.trim())
-                    }
-                }
-            }
-
             Item { Layout.fillHeight: true; Layout.minimumHeight: 1 }
         }
+    }
+
+    // Confirmation dialog for removing the default repository.
+    LogosWarningDialog {
+        id: removeDefaultDialog
+
+        anchors.centerIn: parent
+        title: qsTr("Remove default repository?")
+        width: 420
+
+        message: qsTr("The default Logos repository provides the official package catalog. "
+                      + "Copy the URL first if you want to restore it later — you can re-add it "
+                      + "by pasting it into the \"Add a repository\" field.")
+
+        leftActions: [
+            LogosButton {
+                text: qsTr("Cancel")
+                implicitWidth: 100
+                implicitHeight: 36
+                onClicked: {
+                    d.pendingRemoveUrl = ""
+                    removeDefaultDialog.close()
+                }
+            }
+        ]
+
+        rightActions: [
+            LogosButton {
+                text: qsTr("Remove")
+                implicitWidth: 100
+                implicitHeight: 36
+                onClicked: {
+                    root.removeRequested(d.pendingRemoveUrl)
+                    d.pendingRemoveUrl = ""
+                    removeDefaultDialog.close()
+                }
+            }
+        ]
     }
 }

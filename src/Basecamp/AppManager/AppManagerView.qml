@@ -7,6 +7,7 @@ import Logos.Icons
 import Logos.Theme
 
 import Basecamp.Backend
+import Basecamp.Common
 
 Rectangle {
     id: root
@@ -23,14 +24,13 @@ Rectangle {
     QtObject {
         id: d
 
-        readonly property var stateTabs: [
-            { label: qsTr("All"),           filter: "all" },
-            { label: qsTr("Installed"),     filter: "installed" },
-            { label: qsTr("Not Installed"), filter: "notInstalled" },
-        ]
-
-        readonly property string installStateFilter:
-            (d.stateTabs[stateTabBar.currentIndex]).filter || "all"
+        readonly property string installStateFilter: {
+            switch (stateTabBar.currentIndex) {
+            case 1:  return "installed"
+            case 2:  return "notInstalled"
+            default: return "all"
+            }
+        }
         onInstallStateFilterChanged:
             if (root.appsProxy) root.appsProxy.installStateFilter = installStateFilter
 
@@ -96,7 +96,7 @@ Rectangle {
             LogosSearchBar {
                 id: searchBar
                 Layout.alignment: Qt.AlignRight
-                Layout.preferredWidth: 480
+                Layout.preferredWidth: 605
                 Layout.minimumWidth: 200
                 text: d.searchText
                 placeholderText: qsTr("Search apps…")
@@ -121,48 +121,68 @@ Rectangle {
         RowLayout {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            spacing: Theme.spacing.xlarge
+            spacing: Theme.spacing.medium
 
             // ─── Categories sidebar ───
-            ColumnLayout {
+            Item {
                 Layout.preferredWidth: 200
                 Layout.minimumWidth: 160
                 Layout.maximumWidth: 200
                 Layout.fillHeight: true
-                spacing: Theme.spacing.tiny
 
-                LogosText {
-                    Layout.topMargin: Theme.spacing.tiny
-                    Layout.bottomMargin: Theme.spacing.tiny
-                    text: qsTr("Categories")
-                    font.pixelSize: Theme.typography.subtitleText
-                    font.weight: Theme.typography.weightRegular
-                    color: Theme.palette.text
-                }
+                Flickable {
+                    id: categoriesScroll
+                    anchors.fill: parent
+                    clip: true
+                    contentWidth: width
+                    contentHeight: categoriesCol.implicitHeight
+                    boundsBehavior: Flickable.StopAtBounds
+                    ScrollBar.vertical: LogosScrollBar {
+                        policy: ScrollBar.AsNeeded
+                        visible: categoriesScroll.contentHeight > categoriesScroll.height
+                    }
 
-                ListView {
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: contentHeight
-                    interactive: false
-                    spacing: Theme.spacing.tiny
-                    model: d.categories
-                    currentIndex: d.selectedCategoryIndex
+                    ColumnLayout {
+                        id: categoriesCol
+                        width: categoriesScroll.width
+                        spacing: Theme.spacing.tiny
 
-                    delegate: LogosItemDelegate {
-                        width: ListView.view.width
-                        text: modelData
-                        highlighted: ListView.isCurrentItem
-                        radius: Theme.spacing.radiusLarge
-                        highlightColor: Theme.palette.backgroundButton
-                        hoverColor: "transparent"
-                        textColor: (highlighted || hovered)
-                                       ? Theme.palette.text
-                                       : Theme.palette.textTertiary
-                        onClicked: d.selectedCategoryIndex = index
+                        LogosText {
+                            Layout.topMargin: Theme.spacing.tiny
+                            Layout.bottomMargin: Theme.spacing.tiny
+                            text: qsTr("Categories")
+                            font.pixelSize: Theme.typography.subtitleText
+                            font.weight: Theme.typography.weightRegular
+                            color: Theme.palette.text
+                        }
+
+                        ListView {
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: contentHeight
+                            interactive: false
+                            spacing: Theme.spacing.tiny
+                            model: d.categories
+                            currentIndex: d.selectedCategoryIndex
+
+                            delegate: SidebarNavItem {
+                                width: ListView.view.width
+                                text: modelData
+                                highlighted: ListView.isCurrentItem
+                                onClicked: d.selectedCategoryIndex = index
+                            }
+                        }
                     }
                 }
 
-                Item { Layout.fillWidth: true; Layout.fillHeight: true }
+                component SidebarNavItem: LogosItemDelegate {
+                    id: cell
+                    radius: Theme.spacing.radiusLarge
+                    highlightColor: Theme.palette.backgroundButton
+                    hoverColor: "transparent"
+                    textColor: (cell.highlighted || cell.hovered)
+                                   ? Theme.palette.text
+                                   : Theme.palette.textTertiary
+                }
             }
 
             // ─── Apps panel ───
@@ -173,119 +193,160 @@ Rectangle {
                 radius: Theme.spacing.radiusXlarge
                 clip: true
 
-                LogosSpinner {
-                    anchors.centerIn: parent
-                    visible: root.loading
-                    running: root.loading
-                }
-
                 ColumnLayout {
                     anchors.fill: parent
-                    anchors.margins: Theme.spacing.large
+                    anchors.margins: Theme.spacing.medium
                     spacing: Theme.spacing.medium
-                    visible: !root.loading
 
-                    // ─── Panel header: title + install-state tabs + view toggle ───
-                    RowLayout {
+                    // ─── Panel header: mirrors Package Manager TableHeader ───
+                    // Left: title + install-state tabs. Right: actions + view toggle.
+                    GridLayout {
+                        id: panelHeader
                         Layout.fillWidth: true
-                        spacing: Theme.spacing.xlarge
+                        columnSpacing: Theme.spacing.large
+                        rowSpacing: Theme.spacing.medium
+                        columns: (leftHalf.implicitWidth + rightHalf.implicitWidth + columnSpacing) <= width
+                                 ? 2 : 1
 
-                        LogosText {
-                            Layout.preferredHeight: implicitHeight
-                            text: qsTr("Apps")
-                            font.pixelSize: Theme.typography.panelTitleText
-                            font.weight: Theme.typography.weightMedium
-                            color: Theme.palette.text
-                        }
-
-                        LogosTabBar {
-                            id: stateTabBar
-
-                            Layout.preferredWidth: implicitWidth
+                        RowLayout {
+                            id: leftHalf
+                            Layout.fillWidth: true
                             spacing: Theme.spacing.large
 
-                            Repeater {
-                                model: d.stateTabs
-                                LogosTabButton {
-                                    required property var modelData
-                                    text: modelData.label
-                                }
+                            LogosText {
+                                text: qsTr("Apps")
+                                font.pixelSize: Theme.typography.panelTitleText
+                                font.weight: Theme.typography.weightMedium
+                                color: Theme.palette.text
                             }
-                        }
 
-                        Item { Layout.fillWidth: true }
+                            LogosTabBar {
+                                id: stateTabBar
+                                spacing: Theme.spacing.large
 
-                        LogosIconButton {
-                            iconSource: LogosIcons.refresh
-                            size: 36
-                            iconSize: 18
-                            iconColor: Theme.palette.text
-                            background: Rectangle {
-                                radius: Theme.spacing.radiusLarge
-                                color: parent.hovered ? Theme.palette.backgroundButton
-                                                      : "transparent"
+                                LogosTabButton { text: qsTr("All");           iconSource: LogosIcons.pages }
+                                LogosTabButton { text: qsTr("Installed") }
+                                LogosTabButton { text: qsTr("Not Installed") }
                             }
-                            ToolTip.text: qsTr("Reload apps")
-                            ToolTip.visible: hovered
-                            ToolTip.delay: 500
-                            onClicked: root.refreshRequested()
-                        }
 
-                        LogosButton {
-                            Layout.minimumWidth: 100
-                            Layout.preferredWidth: 130
-                            Layout.maximumWidth: 130
-                            Layout.preferredHeight: 40
-                            radius: Theme.spacing.radiusLarge
-                            text: qsTr("Repositories")
-                            onClicked: root.navigateToRepositories()
+                            Item { Layout.fillWidth: true }
                         }
 
                         RowLayout {
-                            spacing: 24
-                            Layout.preferredHeight: 36
+                            id: rightHalf
+                            Layout.fillWidth: true
+                            spacing: Theme.spacing.medium
 
-                            LogosText {
-                                Layout.alignment: Qt.AlignVCenter
-                                verticalAlignment: Text.AlignVCenter
-                                text: qsTr("View:")
-                                color:  Theme.palette.textTertiary
+                            Item { Layout.fillWidth: panelHeader.columns === 2 }
+
+                            LogosButton {
+                                id: reloadBtn
+                                objectName: "appManager.reloadButton"
+                                Layout.fillWidth: true
+                                Layout.minimumWidth: 80
+                                Layout.preferredWidth: 100
+                                Layout.maximumWidth: 100
+                                Layout.preferredHeight: 40
+                                radius: Theme.spacing.radiusLarge
+                                text: qsTr("Reload")
+                                icon.source: LogosIcons.refresh
+                                icon.size: 18
+                                enabled: !root.loading
+                                onClicked: root.refreshRequested()
                             }
 
-                            LogosIconButton {
-                                iconSource: LogosIcons.grid
-                                size: 20
-                                iconSize: 20
-                                iconColor: d.viewMode === "grid"
-                                           ? Theme.palette.text
-                                           : Theme.palette.textTertiary
-                                onClicked: d.viewMode = "grid"
-                                background: Item{}
+                            LogosButton {
+                                Layout.fillWidth: true
+                                Layout.minimumWidth: 100
+                                Layout.preferredWidth: 130
+                                Layout.maximumWidth: 130
+                                Layout.preferredHeight: 40
+                                radius: Theme.spacing.radiusLarge
+                                text: qsTr("Repositories")
+                                onClicked: root.navigateToRepositories()
                             }
 
-                            LogosIconButton {
-                                iconSource: LogosIcons.list
-                                size: 20
-                                iconSize: 20
-                                iconColor: d.viewMode === "list"
-                                           ? Theme.palette.text
-                                           : Theme.palette.textTertiary
-                                onClicked: d.viewMode = "list"
-                                background: Item{}
+                            RowLayout {
+                                spacing: 24
+                                Layout.preferredHeight: 36
+
+                                LogosText {
+                                    Layout.alignment: Qt.AlignVCenter
+                                    verticalAlignment: Text.AlignVCenter
+                                    text: qsTr("View:")
+                                    color: Theme.palette.textTertiary
+                                }
+
+                                LogosIconButton {
+                                    iconSource: LogosIcons.grid
+                                    size: 20
+                                    iconSize: 20
+                                    iconColor: d.viewMode === "grid"
+                                               ? Theme.palette.text
+                                               : Theme.palette.textTertiary
+                                    onClicked: d.viewMode = "grid"
+                                    background: Item {}
+                                }
+
+                                LogosIconButton {
+                                    iconSource: LogosIcons.list
+                                    size: 20
+                                    iconSize: 20
+                                    iconColor: d.viewMode === "list"
+                                               ? Theme.palette.text
+                                               : Theme.palette.textTertiary
+                                    onClicked: d.viewMode = "list"
+                                    background: Item {}
+                                }
                             }
                         }
                     }
 
-                    Rectangle {
+                    // Empty state — shown when no repositories are configured.
+                    // Replaces the grid so the user gets a direct call-to-action.
+                    Item {
                         Layout.fillWidth: true
-                        Layout.preferredHeight: 1
-                        color: Theme.palette.borderSubtle
+                        Layout.fillHeight: true
+                        visible: root.repositories.length === 0 && !root.loading
+
+                        ColumnLayout {
+                            anchors.centerIn: parent
+                            spacing: Theme.spacing.medium
+                            width: Math.min(parent.width * 0.6, 420)
+
+                            LogosText {
+                                Layout.alignment: Qt.AlignHCenter
+                                text: qsTr("No repositories configured")
+                                font.pixelSize: Theme.typography.subtitleText
+                                font.weight: Theme.typography.weightMedium
+                                color: Theme.palette.text
+                                horizontalAlignment: Text.AlignHCenter
+                            }
+
+                            LogosText {
+                                Layout.alignment: Qt.AlignHCenter
+                                Layout.fillWidth: true
+                                text: qsTr("Add a package repository to browse and install apps.")
+                                font.pixelSize: Theme.typography.primaryText
+                                color: Theme.palette.textSecondary
+                                horizontalAlignment: Text.AlignHCenter
+                                wrapMode: Text.WordWrap
+                            }
+
+                            LogosButton {
+                                Layout.alignment: Qt.AlignHCenter
+                                Layout.topMargin: Theme.spacing.small
+                                text: qsTr("Manage Repositories")
+                                onClicked: root.navigateToRepositories()
+                            }
+                        }
                     }
 
                     Flickable {
                         id: gridScroll
                         Layout.fillWidth: true
                         Layout.fillHeight: true
+                        visible: root.repositories.length > 0 || root.loading
                         clip: true
                         contentWidth: width
                         contentHeight: gridColumn.implicitHeight
@@ -367,5 +428,11 @@ Rectangle {
                 }
             }
         }
+    }
+
+    // Global loading overlay — matches Package Manager UI's Reload feedback.
+    LoadingOverlay {
+        anchors.fill: parent
+        visible: root.loading
     }
 }
