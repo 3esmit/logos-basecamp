@@ -176,21 +176,6 @@
             enableInspector = false;
           };
 
-          # macOS distribution packages (only for Darwin)
-          appBundle = if pkgs.stdenv.isDarwin then
-            import ./nix/macos-bundle.nix {
-              inherit pkgs src;
-              app = appDistributed;
-            }
-          else null;
-          
-          dmg = if pkgs.stdenv.isDarwin then
-            import ./nix/macos-dmg.nix {
-              inherit pkgs;
-              appBundle = appBundle;
-            }
-          else null;
-
           # Distributed build with inspector enabled (for macOS integration tests)
           appDistributedWithInspector = import ./nix/app.nix {
             inherit pkgs common src logosModule logosSdk logosProtocolPkg logosQtSdk logosDesignSystem logosViewModuleRuntime buildInfo;
@@ -221,15 +206,6 @@
               icon = ./app/macos/logos.icns;
               infoPlist = ./app/macos/Info.plist.in;
               entitlements = ./app/macos/LogosBasecamp.entitlements;
-            }
-          else null;
-
-          # Linux AppImage (only for Linux)
-          appImage = if pkgs.stdenv.isLinux then
-            import ./nix/appimage.nix {
-              inherit pkgs src;
-              app = appDistributed;
-              version = common.version;
             }
           else null;
         in
@@ -279,7 +255,7 @@
           };
 
           # QML component tests (Qt Quick Test)
-          qml-tests = import ./nix/qml-tests.nix { inherit pkgs src; };
+          qml-tests = import ./nix/qml-tests.nix { inherit pkgs src logosPackageHeaders; };
 
           # Integration test (UI tests via Qt Inspector)
           integration-test = import ./nix/integration-test.nix { inherit pkgs src logosQtMcp; appPkg = app; };
@@ -307,14 +283,7 @@
             inherit logosQtMcp;
             appBin = "${macosAppTest}/LogosBasecamp.app/Contents/MacOS/LogosBasecamp";
           };
-        } // (if pkgs.stdenv.isDarwin then {
-          # macOS distribution outputs
-          app-bundle = appBundle;
-          inherit dmg;
-        } else {}) // (if pkgs.stdenv.isLinux then {
-          # Linux distribution output
-          appimage = appImage;
-        } else {})
+        }
       );
 
       checks = forAllSystems ({ pkgs, system, ... }: {
@@ -325,7 +294,7 @@
         integration-test = self.packages.${system}.integration-test;
       });
 
-      devShells = forAllSystems ({ pkgs, logosSdk, logosProtocolPkg, logosQtSdk, logosModule, logosLiblogos, logosPackageManagerLibrary, logosPackageManagerModule, logosCapabilityModule, logosPackageLib, logosDesignSystem, logosCppSdkSrc, logosLiblogosSrc, logosPackageManagerModuleSrc, logosCapabilityModuleSrc }: {
+      devShells = forAllSystems ({ pkgs, logosSdk, logosProtocolPkg, logosQtSdk, logosModule, logosLiblogos, logosPackageManagerLibrary, logosPackageManagerModule, logosCapabilityModule, logosPackageLib, logosDesignSystem, logosCppSdkSrc, logosLiblogosSrc, logosPackageManagerModuleSrc, logosCapabilityModuleSrc, ... }: {
         default = pkgs.mkShell {
           nativeBuildInputs = [
             pkgs.cmake
