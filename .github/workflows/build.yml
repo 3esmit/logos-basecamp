@@ -1,18 +1,51 @@
 name: Build & Release
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - master
-      - 'release/**'
   pull_request:
     branches: [master]
+
+permissions:
+  contents: read
 
 env:
   ATTIC_CACHE: ${{ github.ref == 'refs/heads/master' && 'public' || 'ci' }}
 
 jobs:
+  release_contract:
+    name: Validate release contract
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Validate tracked release files
+        run: scripts/test-release-contract.sh
+
+      - name: Validate release dispatch
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/master"
+          version="$(tr -d '\n' < VERSION)"
+          if gh release view "$version" >/dev/null 2>&1; then
+            echo "Release $version already exists" >&2
+            exit 1
+          fi
+
+      - name: Export version
+        id: version
+        run: echo "version=$(tr -d '\n' < VERSION)" >> "$GITHUB_OUTPUT"
+
   build-appimage:
+    needs: release_contract
     environment: ${{ github.ref == 'refs/heads/master' && 'public-cache' || '' }}
     env:
       ATTIC_AVAILABLE: >-
@@ -33,7 +66,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - uses: cachix/install-nix-action@v27
         with:
@@ -62,17 +95,19 @@ jobs:
 
       - name: Rename AppImage with architecture
         run: |
+          version="$(tr -d '\n' < VERSION)"
           arch="${{ matrix.arch }}"
           arch_short="${arch%%-*}"
           src=$(find result/ -name '*.AppImage' -print -quit)
-          cp "$src" "logos-basecamp-${arch_short}.AppImage"
+          cp "$src" "logos-basecamp-${version}-${arch_short}.AppImage"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: appimage-${{ matrix.arch }}
           path: logos-basecamp-*.AppImage
 
   build-macos-app:
+    needs: release_contract
     environment: ${{ github.ref == 'refs/heads/master' && 'public-cache' || '' }}
     env:
       ATTIC_AVAILABLE: >-
@@ -86,7 +121,7 @@ jobs:
     runs-on: macos-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - uses: DeterminateSystems/nix-installer-action@main
         with:
@@ -114,15 +149,17 @@ jobs:
 
       - name: Package app bundle as tarball
         run: |
+          version="$(tr -d '\n' < VERSION)"
           app=$(find result/ -name '*.app' -maxdepth 1 -print -quit)
-          tar -czf logos-basecamp-aarch64-unsigned.app.tar.gz -C result "$(basename "$app")"
+          tar -czf "logos-basecamp-${version}-aarch64-unsigned.app.tar.gz" -C result "$(basename "$app")"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: macos-app-aarch64-darwin
-          path: logos-basecamp-aarch64-unsigned.app.tar.gz
+          path: logos-basecamp-*-aarch64-unsigned.app.tar.gz
 
   test-linux:
+    needs: release_contract
     environment: ${{ github.ref == 'refs/heads/master' && 'public-cache' || '' }}
     env:
       ATTIC_AVAILABLE: >-
@@ -143,7 +180,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - uses: cachix/install-nix-action@v27
         with:
@@ -166,6 +203,7 @@ jobs:
         run: nix build .#integration-test -L
 
   test-macos:
+    needs: release_contract
     environment: ${{ github.ref == 'refs/heads/master' && 'public-cache' || '' }}
     env:
       ATTIC_AVAILABLE: >-
@@ -179,7 +217,7 @@ jobs:
     runs-on: macos-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - uses: DeterminateSystems/nix-installer-action@main
         with:
@@ -201,37 +239,72 @@ jobs:
         run: nix build .#integration-test-bundle -L
 
   release:
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/')
-    needs: [build-appimage, build-macos-app]
+    if: github.event_name == 'workflow_dispatch'
+    needs: [release_contract, build-appimage, build-macos-app, test-linux, test-macos]
     runs-on: ubuntu-latest
     permissions:
       contents: write
 
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: appimage-x86_64-linux
           path: artifacts/
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: appimage-aarch64-linux
           path: artifacts/
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: macos-app-aarch64-darwin
           path: artifacts/
 
-      - name: Generate tag
-        id: tag
-        run: echo "tag=pre-release-${GITHUB_SHA::7}-${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+      - name: Generate checksums
+        run: |
+          cd artifacts
+          sha256sum ./*.AppImage ./*.app.tar.gz > SHA256SUMS
 
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
-          tag_name: ${{ steps.tag.outputs.tag }}
-          name: Pre-release ${{ steps.tag.outputs.tag }}
+          tag_name: ${{ needs.release_contract.outputs.version }}
+          target_commitish: ${{ github.sha }}
+          name: Logos Basecamp ${{ needs.release_contract.outputs.version }}
+          draft: true
           prerelease: true
+          make_latest: false
+          generate_release_notes: true
+          fail_on_unmatched_files: true
           files: |
             artifacts/*.AppImage
             artifacts/*.app.tar.gz
+            artifacts/SHA256SUMS
+
+      - name: Verify and publish draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.release_contract.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir published-artifacts
+          gh release download "$VERSION" --dir published-artifacts
+          test "$(find published-artifacts -maxdepth 1 -type f | wc -l)" -eq 4
+          test "$(wc -l < published-artifacts/SHA256SUMS)" -eq 3
+          (
+            cd published-artifacts
+            sha256sum --check SHA256SUMS
+          )
+          tag_target="$(
+            gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$VERSION" \
+              --jq '.object.sha'
+          )"
+          test "$tag_target" = "$GITHUB_SHA"
+          gh release edit "$VERSION" --draft=false --prerelease --latest=false
+
+      - name: Remove failed draft
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.release_contract.outputs.version }}
+        run: gh release delete "$VERSION" --yes --cleanup-tag || true
