@@ -203,6 +203,16 @@ private slots:
     {
         const QString selected = CatalogResolution::maintainedRepositoryUrl();
         const QString official = QStringLiteral("https://packages.logos.co/logos-repo.json");
+        const QVariantList required{
+            QVariantMap{
+                {QStringLiteral("name"), QStringLiteral("logos_inspector")},
+                {QStringLiteral("repositoryUrl"), selected},
+            },
+            QVariantMap{
+                {QStringLiteral("name"), QStringLiteral("storage_module")},
+                {QStringLiteral("repositoryUrl"), selected},
+            },
+        };
         const QVariantList resolved{
             QVariantMap{
                 {QStringLiteral("name"), QStringLiteral("logos_inspector")},
@@ -214,10 +224,115 @@ private slots:
             },
         };
 
-        const QString error = CatalogResolution::validateResolvedRows(resolved, selected);
+        const QString error =
+            CatalogResolution::validateResolvedRows(resolved, selected, required);
 
         QVERIFY(error.contains(QStringLiteral("storage_module")));
         QVERIFY(error.contains(QStringLiteral("different repository")));
+    }
+
+    void resolverResponse_missingRequiredPackage_isRejected()
+    {
+        const QString selected = CatalogResolution::maintainedRepositoryUrl();
+        const QVariantList required{
+            QVariantMap{
+                {QStringLiteral("name"), QStringLiteral("logos_inspector")},
+                {QStringLiteral("repositoryUrl"), selected},
+            },
+            QVariantMap{
+                {QStringLiteral("name"), QStringLiteral("delivery_module")},
+                {QStringLiteral("repositoryUrl"), selected},
+            },
+        };
+        const QVariantList resolved{
+            QVariantMap{
+                {QStringLiteral("name"), QStringLiteral("logos_inspector")},
+                {QStringLiteral("repositoryUrl"), selected},
+            },
+        };
+
+        const QString error =
+            CatalogResolution::validateResolvedRows(resolved, selected, required);
+
+        QVERIFY(error.contains(QStringLiteral("delivery_module")));
+        QVERIFY(error.contains(QStringLiteral("omitted")));
+    }
+
+    void resolverResponse_emptyOrUnexpectedPackage_isRejected()
+    {
+        const QString selected = CatalogResolution::maintainedRepositoryUrl();
+        const QVariantList required{
+            QVariantMap{
+                {QStringLiteral("name"), QStringLiteral("logos_inspector")},
+                {QStringLiteral("repositoryUrl"), selected},
+            },
+        };
+
+        const QString emptyError =
+            CatalogResolution::validateResolvedRows({}, selected, required);
+        QVERIFY(emptyError.contains(QStringLiteral("logos_inspector")));
+        QVERIFY(emptyError.contains(QStringLiteral("omitted")));
+
+        const QVariantList unexpected{
+            QVariantMap{
+                {QStringLiteral("name"), QStringLiteral("official_module")},
+                {QStringLiteral("repositoryUrl"), selected},
+            },
+        };
+        const QString unexpectedError =
+            CatalogResolution::validateResolvedRows(unexpected, selected, required);
+        QVERIFY(unexpectedError.contains(QStringLiteral("official_module")));
+        QVERIFY(unexpectedError.contains(QStringLiteral("unexpected")));
+    }
+
+    void resolverResponse_errorRow_preservesResolverCause()
+    {
+        const QString selected = CatalogResolution::maintainedRepositoryUrl();
+        const QVariantList required{
+            QVariantMap{
+                {QStringLiteral("name"), QStringLiteral("logos_inspector")},
+                {QStringLiteral("repositoryUrl"), selected},
+            },
+            QVariantMap{
+                {QStringLiteral("name"), QStringLiteral("delivery_module")},
+                {QStringLiteral("repositoryUrl"), selected},
+            },
+        };
+        const QVariantList resolved{
+            QVariantMap{
+                {QStringLiteral("name"), QStringLiteral("delivery_module")},
+                {QStringLiteral("error"), QStringLiteral("release asset is unavailable")},
+            },
+        };
+
+        const QString error =
+            CatalogResolution::validateResolvedRows(resolved, selected, required);
+
+        QVERIFY(error.contains(QStringLiteral("delivery_module")));
+        QVERIFY(error.contains(QStringLiteral("release asset is unavailable")));
+    }
+
+    void resolverResponse_exactSetSucceedsAndDuplicateFails()
+    {
+        const QString selected = CatalogResolution::maintainedRepositoryUrl();
+        const QVariantMap inspector{
+            {QStringLiteral("name"), QStringLiteral("logos_inspector")},
+            {QStringLiteral("repositoryUrl"), selected},
+        };
+        const QVariantMap delivery{
+            {QStringLiteral("name"), QStringLiteral("delivery_module")},
+            {QStringLiteral("repositoryUrl"), selected},
+        };
+        const QVariantList required{inspector, delivery};
+
+        const QString exactError = CatalogResolution::validateResolvedRows(
+            QVariantList{delivery, inspector}, selected, required);
+        QVERIFY2(exactError.isEmpty(), qPrintable(exactError));
+
+        const QString duplicateError = CatalogResolution::validateResolvedRows(
+            QVariantList{inspector, inspector}, selected, required);
+        QVERIFY(duplicateError.contains(QStringLiteral("logos_inspector")));
+        QVERIFY(duplicateError.contains(QStringLiteral("duplicate")));
     }
 
     void maintainedRepositoryPresence_usesExactUrlWithoutDuplicates()

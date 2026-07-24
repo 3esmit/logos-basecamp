@@ -1502,7 +1502,8 @@ void PackageCoordinator::runResolverAndOpenDialog(const QString& name,
     LogosModules logos(m_logosAPI);
     QPointer<PackageCoordinator> self(this);
     logos.package_downloader.resolveDependenciesAsync(plan.dependenciesJson, QString(),
-        [self, name, repositoryUrl, targetVersion, catalogRow, epoch]
+        [self, name, repositoryUrl, targetVersion, catalogRow, epoch,
+         requiredPackages = plan.requiredPackages]
         (QVariantList resolved) {
             if (!self) return;
             if (self->m_dialogResolveEpoch.value(name) != epoch) {
@@ -1511,7 +1512,8 @@ void PackageCoordinator::runResolverAndOpenDialog(const QString& name,
                 return;
             }
             const QString sourceError =
-                CatalogResolution::validateResolvedRows(resolved, repositoryUrl);
+                CatalogResolution::validateResolvedRows(
+                    resolved, repositoryUrl, requiredPackages);
             if (!sourceError.isEmpty()) {
                 self->presentCatalogResolutionError(
                     name, repositoryUrl, targetVersion, catalogRow, sourceError,
@@ -1682,11 +1684,13 @@ void PackageCoordinator::confirmCatalogInstall(const QString& name,
     // MB or the user is on a slow connection
     constexpr int kDownloadIpcDeadlineMs = 5 * 60 * 1000;
     logos.package_downloader.downloadResolvedDependenciesAsync(plan.dependenciesJson, QString(),
-        [self, name, repositoryUrl, targetVersion, catalogRow](QVariantList results) {
+        [self, name, repositoryUrl, targetVersion, catalogRow,
+         requiredPackages = plan.requiredPackages](QVariantList results) {
             if (!self) return;
 
             const QString sourceError =
-                CatalogResolution::validateResolvedRows(results, repositoryUrl);
+                CatalogResolution::validateResolvedRows(
+                    results, repositoryUrl, requiredPackages);
             if (!sourceError.isEmpty()) {
                 self->m_installRegistry->fail(name, sourceError);
                 emit self->catalogInstallStageChanged(name, InstallStage::Failed);
