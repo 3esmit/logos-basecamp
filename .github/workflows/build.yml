@@ -14,6 +14,15 @@ env:
 jobs:
   build-appimage:
     environment: ${{ github.ref == 'refs/heads/master' && 'public-cache' || '' }}
+    env:
+      ATTIC_AVAILABLE: >-
+        ${{
+          secrets.ATTIC_ENDPOINT != '' &&
+          (
+            (github.ref == 'refs/heads/master' && secrets.ATTIC_TOKEN_PUBLIC != '') ||
+            (github.ref != 'refs/heads/master' && secrets.ATTIC_TOKEN_CI != '')
+          )
+        }}
     strategy:
       matrix:
         include:
@@ -34,7 +43,9 @@ jobs:
             extra-trusted-public-keys = public:Z1wyVBEx8PHbXujYB52Mysv9Rd8rWIhyQ3bQyef9yy4=
             fallback = true
 
-      - uses: ryanccn/attic-action@v0.4.1
+      - name: Setup Attic cache
+        if: env.ATTIC_AVAILABLE == 'true'
+        uses: ryanccn/attic-action@v0.4.1
         with:
           endpoint: ${{ secrets.ATTIC_ENDPOINT }}
           cache: ${{ env.ATTIC_CACHE }}
@@ -63,6 +74,15 @@ jobs:
 
   build-macos-app:
     environment: ${{ github.ref == 'refs/heads/master' && 'public-cache' || '' }}
+    env:
+      ATTIC_AVAILABLE: >-
+        ${{
+          secrets.ATTIC_ENDPOINT != '' &&
+          (
+            (github.ref == 'refs/heads/master' && secrets.ATTIC_TOKEN_PUBLIC != '') ||
+            (github.ref != 'refs/heads/master' && secrets.ATTIC_TOKEN_CI != '')
+          )
+        }}
     runs-on: macos-latest
 
     steps:
@@ -75,7 +95,9 @@ jobs:
             extra-trusted-public-keys = public:Z1wyVBEx8PHbXujYB52Mysv9Rd8rWIhyQ3bQyef9yy4=
             fallback = true
 
-      - uses: ryanccn/attic-action@v0.4.1
+      - name: Setup Attic cache
+        if: env.ATTIC_AVAILABLE == 'true'
+        uses: ryanccn/attic-action@v0.4.1
         with:
           endpoint: ${{ secrets.ATTIC_ENDPOINT }}
           cache: ${{ env.ATTIC_CACHE }}
@@ -102,6 +124,15 @@ jobs:
 
   test-linux:
     environment: ${{ github.ref == 'refs/heads/master' && 'public-cache' || '' }}
+    env:
+      ATTIC_AVAILABLE: >-
+        ${{
+          secrets.ATTIC_ENDPOINT != '' &&
+          (
+            (github.ref == 'refs/heads/master' && secrets.ATTIC_TOKEN_PUBLIC != '') ||
+            (github.ref != 'refs/heads/master' && secrets.ATTIC_TOKEN_CI != '')
+          )
+        }}
     strategy:
       matrix:
         include:
@@ -122,7 +153,9 @@ jobs:
             extra-trusted-public-keys = public:Z1wyVBEx8PHbXujYB52Mysv9Rd8rWIhyQ3bQyef9yy4=
             fallback = true
 
-      - uses: ryanccn/attic-action@v0.4.1
+      - name: Setup Attic cache
+        if: env.ATTIC_AVAILABLE == 'true'
+        uses: ryanccn/attic-action@v0.4.1
         with:
           endpoint: ${{ secrets.ATTIC_ENDPOINT }}
           cache: ${{ env.ATTIC_CACHE }}
@@ -134,6 +167,15 @@ jobs:
 
   test-macos:
     environment: ${{ github.ref == 'refs/heads/master' && 'public-cache' || '' }}
+    env:
+      ATTIC_AVAILABLE: >-
+        ${{
+          secrets.ATTIC_ENDPOINT != '' &&
+          (
+            (github.ref == 'refs/heads/master' && secrets.ATTIC_TOKEN_PUBLIC != '') ||
+            (github.ref != 'refs/heads/master' && secrets.ATTIC_TOKEN_CI != '')
+          )
+        }}
     runs-on: macos-latest
 
     steps:
@@ -146,7 +188,9 @@ jobs:
             extra-trusted-public-keys = public:Z1wyVBEx8PHbXujYB52Mysv9Rd8rWIhyQ3bQyef9yy4=
             fallback = true
 
-      - uses: ryanccn/attic-action@v0.4.1
+      - name: Setup Attic cache
+        if: env.ATTIC_AVAILABLE == 'true'
+        uses: ryanccn/attic-action@v0.4.1
         with:
           endpoint: ${{ secrets.ATTIC_ENDPOINT }}
           cache: ${{ env.ATTIC_CACHE }}

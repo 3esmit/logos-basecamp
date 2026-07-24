@@ -60,6 +60,15 @@ jobs:
   doctests:
     name: basecamp doc-tests (${{ matrix.os }})
     environment: ${{ github.ref == 'refs/heads/master' && 'public-cache' || '' }}
+    env:
+      ATTIC_AVAILABLE: >-
+        ${{
+          secrets.ATTIC_ENDPOINT != '' &&
+          (
+            (github.ref == 'refs/heads/master' && secrets.ATTIC_TOKEN_PUBLIC != '') ||
+            (github.ref != 'refs/heads/master' && secrets.ATTIC_TOKEN_CI != '')
+          )
+        }}
     strategy:
       fail-fast: false
       matrix:
@@ -81,6 +90,7 @@ jobs:
             fallback = true
 
       - name: Setup Attic cache
+        if: env.ATTIC_AVAILABLE == 'true'
         uses: ryanccn/attic-action@v0.4.1
         with:
           endpoint: ${{ secrets.ATTIC_ENDPOINT }}
