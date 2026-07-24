@@ -1,5 +1,6 @@
 #pragma once
 
+#include "CatalogResolution.h"
 #include "InstallEnums.h"
 
 #include <QObject>
@@ -301,6 +302,7 @@ private:
     void buildCatalogIndexes(const QVariantList& catalog);
     void populateAppsModel(const QVariantList& catalog,
                            const QHash<QString, QString>& installedByName);
+    void ensureMaintainedRepository();
 
     // Full rescan: getInstalledPackages → per-entry resolveFlatDependencies +
     // resolveFlatDependents. Populates m_installTypeByModule,
@@ -309,17 +311,19 @@ private:
     // pick up the new installType / missing-deps values.
     void refreshDependencyInfo();
 
-    // Builds the resolver's depsJson for `name@repositoryUrl` with optional
-    // per-row version pins. The target is row 0; remaining pin rows fall back
-    // to the catalog-known repo from m_repoByName. Empty version/repo fields
-    // are omitted so the resolver uses its newest/cross-repo defaults.
-    QString buildResolverDepsJson(const QString& name,
-                                  const QString& repositoryUrl,
-                                  const QVariantMap& versionPins) const;
-    // Transitive required-package set ({name, repositoryUrl}) computed purely
-    // from the local catalog dependency graph — no async resolver.
-    QVariantList collectCatalogRequired(const QString& name,
-                                        const QString& repositoryUrl) const;
+    // Resolves the selected catalog's full closure locally before downloader
+    // IPC. Every request entry is source-pinned to repositoryUrl; a missing
+    // package or version fails closed instead of falling back to another repo.
+    CatalogResolution::Plan buildCatalogResolutionPlan(
+        const QString& name,
+        const QString& repositoryUrl,
+        const QVariantMap& versionPins) const;
+    void presentCatalogResolutionError(const QString& name,
+                                       const QString& repositoryUrl,
+                                       const QString& targetVersion,
+                                       const QVariantMap& catalogRow,
+                                       const QString& error,
+                                       bool requestOpen);
     QString buildInstalledPackagesJson() const;
     QVariantList computeDepChanges(const QVariantList& resolved,
                                    const QHash<QString, QString>& installedByName) const;
@@ -371,10 +375,7 @@ private:
     PendingAction m_pendingAction;
     QString m_pendingInstallPath;
     QHash<QString, QVariantList> m_versionsByRepoAndName;
-    static QString catalogKey(const QString& repositoryUrl, const QString& name)
-        { return repositoryUrl + QLatin1Char('\n') + name; }
-
-    QHash<QString, QString> m_repoByName;
+    CatalogResolution::CatalogRows m_catalogRows;
     QVariantList m_installedPackagesCache;
     QSet<QString>            m_installedNameSet;
     QHash<QString, QString>  m_installedVersionByName;
@@ -389,10 +390,13 @@ private:
     // Last resolver output per top-level: raw IPC rows and derived changes.
     QHash<QString, QVariantList> m_lastResolvedRawByName;
     QHash<QString, QVariantList> m_lastResolvedChangesByName;
+    QHash<QString, QVariantList> m_requiredPackagesByTopLevel;
+    QHash<QString, QString> m_selectedRepositoryByTopLevel;
 
     InstallRegistry* m_installRegistry = nullptr;
 
     QVariantList m_repositories;
     int          m_repositoriesLoadingCount = 0;
     bool         m_appsLoading              = true;
+    bool         m_maintainedRepositorySeedInFlight = false;
 };
