@@ -113,6 +113,33 @@ sections:
         run: "nix build 'github:logos-co/logos-package-manager#cli-portable' -o result-lgpm"
         check_file: "result-lgpm/bin/lgpm"
 
+  - title: "Select the maintained package catalog"
+    step: true
+    text: |
+      Configure `lgpd` with the maintained source-release catalog and pin every
+      download to it. This prevents an identically named package from the default
+      catalog from satisfying either side of the compatibility check.
+    steps:
+      - title: "Initialize the downloader configuration"
+        run: |
+          rm -rf testdata/catalog
+          mkdir -p testdata/catalog
+          ./result-lgpd/bin/lgpd config init testdata/catalog/repositories.json
+          ./result-lgpd/bin/lgpd \
+            --config testdata/catalog/repositories.json \
+            repo add \
+            https://raw.githubusercontent.com/3esmit/logos-3esmit-release/main/logos-repo.json
+          ./result-lgpd/bin/lgpd \
+            --config testdata/catalog/repositories.json \
+            repo refresh
+          ./result-lgpd/bin/lgpd \
+            --config testdata/catalog/repositories.json \
+            --repo logos-3esmit-release \
+            list
+        expect_contains:
+          - "accounts_module"
+          - "accounts_ui"
+
   - title: "Build the basecamp bundle"
     step: true
     text: |
@@ -144,14 +171,22 @@ sections:
         text: |
           `#install-portable` produces the same `modules/<name>/` layout basecamp
           loads from a user-dir — a portable plugin plus its metadata.
-        run: "nix build 'github:logos-co/logos-accounts-module#install-portable' -o result-accA-mod"
+        run: "nix build 'github:3esmit/logos-accounts-module#install-portable' -o result-accA-mod"
         check_file: "result-accA-mod/modules/accounts_module"
 
       - title: "Download the latest released accounts_ui"
         text: |
           `lgpd` fetches the latest `accounts_ui` `.lgx` from the package manager
           catalog into `./dl-accA`.
-        run: "rm -rf dl-accA && mkdir -p dl-accA && ./result-lgpd/bin/lgpd download accounts_ui -o dl-accA && ls dl-accA"
+        run: |
+          rm -rf dl-accA
+          mkdir -p dl-accA
+          ./result-lgpd/bin/lgpd \
+            --config testdata/catalog/repositories.json \
+            --repo logos-3esmit-release \
+            download accounts_ui \
+            -o dl-accA
+          ls dl-accA
         expect_contains:
           - "accounts_ui"
 
@@ -243,11 +278,19 @@ sections:
         text: |
           For a QML UI, `#install-portable` produces a `plugins/<name>/` layout with
           the plugin, its `qml/` view, and metadata.
-        run: "nix build 'github:logos-co/logos-accounts-ui#install-portable' -o result-accB-ui"
+        run: "nix build 'github:3esmit/logos-accounts-ui#install-portable' -o result-accB-ui"
         check_file: "result-accB-ui/plugins/accounts_ui"
 
       - title: "Download the latest released accounts_module"
-        run: "rm -rf dl-accB && mkdir -p dl-accB && ./result-lgpd/bin/lgpd download accounts_module -o dl-accB && ls dl-accB"
+        run: |
+          rm -rf dl-accB
+          mkdir -p dl-accB
+          ./result-lgpd/bin/lgpd \
+            --config testdata/catalog/repositories.json \
+            --repo logos-3esmit-release \
+            download accounts_module \
+            -o dl-accB
+          ls dl-accB
         expect_contains:
           - "accounts_module"
 
