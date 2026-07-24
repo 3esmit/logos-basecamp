@@ -118,6 +118,7 @@ set(SOURCES
     CoreModuleManager.cpp
     UIPluginManager.cpp
     PackageCoordinator.cpp
+    CatalogResolution.cpp
     InstallRegistry.cpp
     AppsModel.cpp
     PluginLoader.cpp

@@ -1,4 +1,5 @@
 #include "PackageCoordinator.h"
+#include "CatalogResolution.h"
 #include "InstallRegistry.h"
 #include "AppsFilterProxy.h"
 #include "AppsModel.h"
@@ -545,6 +546,7 @@ void PackageCoordinator::refresh()
 {
     fetchUiPluginMetadata();
     refreshRepositories();
+    ensureMaintainedRepository();
 }
 
 void PackageCoordinator::remoteRefresh()
@@ -958,20 +960,17 @@ void PackageCoordinator::tryFetchCatalog(const QHash<QString, QString>& installe
 void PackageCoordinator::buildCatalogIndexes(const QVariantList& catalog)
 {
     QHash<QString, QVariantList> versionsByRepoAndName;
-    QHash<QString, QString>      repoByName;
     versionsByRepoAndName.reserve(catalog.size());
-    repoByName.reserve(catalog.size());
     for (const QVariant& v : catalog) {
         const QVariantMap row = v.toMap();
         const QString name = row.value("name").toString();
         if (name.isEmpty()) continue;
         const QString repo = row.value("repositoryUrl").toString();
-        versionsByRepoAndName.insert(catalogKey(repo, name),
+        versionsByRepoAndName.insert(CatalogResolution::catalogKey(repo, name),
                                      row.value("versions").toList());
-        repoByName.insert(name, repo);
     }
     m_versionsByRepoAndName = std::move(versionsByRepoAndName);
-    m_repoByName            = std::move(repoByName);
+    m_catalogRows = CatalogResolution::indexCatalogRows(catalog);
 }
 
 void PackageCoordinator::populateAppsModel(
@@ -1039,6 +1038,63 @@ void PackageCoordinator::refreshRepositories()
             const int remaining = --self->m_repositoriesLoadingCount;
             emit self->repositoriesChanged();
             if (remaining == 0) emit self->repositoriesLoadingChanged();
+        });
+}
+
+void PackageCoordinator::ensureMaintainedRepository()
+{
+    LogosAPIClient* dlClient = m_logosAPI
+        ? m_logosAPI->getClient("package_downloader")
+        : nullptr;
+    if (!dlClient || !dlClient->isConnected() || m_maintainedRepositorySeedInFlight)
+        return;
+
+    m_maintainedRepositorySeedInFlight = true;
+    QPointer<PackageCoordinator> self(this);
+    dlClient->invokeRemoteMethodAsync(
+        "package_downloader", "listRepositories", QVariantList{},
+        [self](QVariant result) {
+            if (!self) return;
+
+            self->m_repositories = result.toList();
+            emit self->repositoriesChanged();
+            if (CatalogResolution::containsRepository(
+                    self->m_repositories, CatalogResolution::maintainedRepositoryUrl())) {
+                self->m_maintainedRepositorySeedInFlight = false;
+                return;
+            }
+
+            LogosAPIClient* addClient = self->m_logosAPI
+                ? self->m_logosAPI->getClient("package_downloader")
+                : nullptr;
+            if (!addClient || !addClient->isConnected()) {
+                self->m_maintainedRepositorySeedInFlight = false;
+                return;
+            }
+
+            addClient->invokeRemoteMethodAsync(
+                "package_downloader", "addRepository",
+                QVariantList{CatalogResolution::maintainedRepositoryUrl()},
+                [self](QVariant addResult) {
+                    if (!self) return;
+                    self->m_maintainedRepositorySeedInFlight = false;
+
+                    const QVariantMap outcome = addResult.toMap();
+                    const bool success = outcome.value("success").toBool();
+                    const QString error = outcome.value("error").toString();
+                    emit self->repositoryOperationCompleted(
+                        QStringLiteral("add"), CatalogResolution::maintainedRepositoryUrl(),
+                        success, error);
+                    if (!success) {
+                        qWarning() << "Could not add maintained package repository:" << error;
+                        return;
+                    }
+
+                    // Do not rely solely on catalogChanged: refresh both the
+                    // repository list and app catalog after a successful seed.
+                    self->refreshRepositories();
+                    self->remoteRefresh();
+                });
         });
 }
 
@@ -1234,53 +1290,12 @@ void PackageCoordinator::refreshDependencyInfo()
 // PackageManagerBackend, adapted to PackageCoordinator's session model).
 // ---------------------------------------------------------------------------
 
-QString PackageCoordinator::buildResolverDepsJson(const QString& name,
-                                                  const QString& repositoryUrl,
-                                                  const QVariantMap& versionPins) const
+CatalogResolution::Plan PackageCoordinator::buildCatalogResolutionPlan(
+    const QString& name,
+    const QString& repositoryUrl,
+    const QVariantMap& versionPins) const
 {
-    QJsonArray arr;
-    QSet<QString> seenDeps;
-    auto append = [&arr, &seenDeps](const QString& n, const QString& repo, const QString& ver) {
-        if (n.isEmpty() || seenDeps.contains(n)) return;
-        seenDeps.insert(n);
-        QJsonObject obj;
-        obj.insert(QStringLiteral("name"), n);
-        if (!repo.isEmpty()) obj.insert(QStringLiteral("repositoryUrl"), repo);
-        if (!ver.isEmpty())  obj.insert(QStringLiteral("version"), ver);
-        arr.append(obj);
-    };
-
-    append(name, repositoryUrl, versionPins.value(name).toString());
-
-    if (!repositoryUrl.isEmpty() && m_appsModel) {
-        QStringList queue;
-        queue << name;
-        for (int head = 0; head < queue.size(); ++head) {
-            const QString cur = queue[head];
-            const QVariantMap row = m_appsModel->rowDataByName(cur, repositoryUrl);
-            if (row.isEmpty()) continue;
-            const QVariantList deps = row.value("dependencies").toList();
-            for (const QVariant& d : deps) {
-                const QString depName = d.toMap().value("name").toString();
-                if (depName.isEmpty() || seenDeps.contains(depName)) continue;
-                const QVariantMap depRow =
-                    m_appsModel->rowDataByName(depName, repositoryUrl);
-                if (depRow.isEmpty()) continue;  // not in this repo — leave unpinned
-                append(depName, repositoryUrl, versionPins.value(depName).toString());
-                queue << depName;
-            }
-        }
-    }
-
-    for (auto it = versionPins.cbegin(); it != versionPins.cend(); ++it) {
-        const QString pinName = it.key();
-        if (pinName == name || pinName.isEmpty()) continue;
-        if (seenDeps.contains(pinName)) continue;
-        const QString pinVersion = it.value().toString();
-        if (pinVersion.isEmpty()) continue;
-        append(pinName, m_repoByName.value(pinName), pinVersion);
-    }
-    return QString::fromUtf8(QJsonDocument(arr).toJson(QJsonDocument::Compact));
+    return CatalogResolution::buildPlan(name, repositoryUrl, versionPins, m_catalogRows);
 }
 
 QString PackageCoordinator::buildInstalledPackagesJson() const
@@ -1312,34 +1327,6 @@ QVariantMap nameAndRepo(const QString& name, const QString& repo)
         {QStringLiteral("name"),          name},
         {QStringLiteral("repositoryUrl"), repo},
     };
-}
-
-QVariantList PackageCoordinator::collectCatalogRequired(const QString& name,
-                                                        const QString& repositoryUrl) const
-{
-    QVariantList out;
-    QSet<QString> seen;
-    out.append(nameAndRepo(name, repositoryUrl));
-    seen.insert(name);
-
-    if (repositoryUrl.isEmpty() || !m_appsModel) return out;
-
-    QStringList queue;
-    queue << name;
-    for (int head = 0; head < queue.size(); ++head) {
-        const QVariantMap row = m_appsModel->rowDataByName(queue[head], repositoryUrl);
-        if (row.isEmpty()) continue;
-        const QVariantList deps = row.value("dependencies").toList();
-        for (const QVariant& d : deps) {
-            const QString depName = d.toMap().value("name").toString();
-            if (depName.isEmpty() || seen.contains(depName)) continue;
-            if (m_appsModel->rowDataByName(depName, repositoryUrl).isEmpty()) continue;
-            seen.insert(depName);
-            out.append(nameAndRepo(depName, repositoryUrl));
-            queue << depName;
-        }
-    }
-    return out;
 }
 
 QString PackageCoordinator::depAction(const QString& installedVersion,
@@ -1402,11 +1389,37 @@ QVariantList PackageCoordinator::computeDepChanges(
         }
         const QString repoUrl = c.value("repositoryUrl").toString();
         c.insert(QStringLiteral("versions"),
-                 m_versionsByRepoAndName.value(catalogKey(repoUrl, name)));
+                 m_versionsByRepoAndName.value(
+                     CatalogResolution::catalogKey(repoUrl, name)));
         if (c.value("isTopLevel").toBool()) out.prepend(c);
         else                                out.append(c);
     }
     return out;
+}
+
+void PackageCoordinator::presentCatalogResolutionError(
+    const QString& name,
+    const QString& repositoryUrl,
+    const QString& targetVersion,
+    const QVariantMap& catalogRow,
+    const QString& error,
+    bool requestOpen)
+{
+    m_lastResolvedRawByName.remove(name);
+    m_lastResolvedChangesByName.remove(name);
+    m_requiredPackagesByTopLevel.remove(name);
+    m_selectedRepositoryByTopLevel.insert(name, repositoryUrl);
+
+    const QVariantList changes{
+        QVariantMap{
+            {QStringLiteral("name"), name},
+            {QStringLiteral("repositoryUrl"), repositoryUrl},
+            {QStringLiteral("action"), QStringLiteral("error")},
+            {QStringLiteral("error"), error},
+            {QStringLiteral("isTopLevel"), true},
+        },
+    };
+    emitDialogMetadata(name, repositoryUrl, targetVersion, catalogRow, changes, requestOpen);
 }
 
 void PackageCoordinator::setOpStage(const QString& name, InstallStage::Value stage)
@@ -1464,7 +1477,16 @@ void PackageCoordinator::runResolverAndOpenDialog(const QString& name,
     const int epoch = ++m_dialogResolveEpoch[name];
     m_activeAddDialogName = name;
 
-    const QString depsJson = buildResolverDepsJson(name, repositoryUrl, versionPins);
+    const CatalogResolution::Plan plan =
+        buildCatalogResolutionPlan(name, repositoryUrl, versionPins);
+    if (!plan.isValid()) {
+        presentCatalogResolutionError(
+            name, repositoryUrl, targetVersion, catalogRow, plan.error, /*requestOpen=*/true);
+        return;
+    }
+
+    m_selectedRepositoryByTopLevel.insert(name, repositoryUrl);
+    m_requiredPackagesByTopLevel.insert(name, plan.requiredPackages);
 
     qDebug() << "PackageCoordinator::runResolverAndOpenDialog" << name
              << "repo=" << repositoryUrl << "targetVersion=" << targetVersion
@@ -1479,13 +1501,21 @@ void PackageCoordinator::runResolverAndOpenDialog(const QString& name,
 
     LogosModules logos(m_logosAPI);
     QPointer<PackageCoordinator> self(this);
-    logos.package_downloader.resolveDependenciesAsync(depsJson, QString(),
+    logos.package_downloader.resolveDependenciesAsync(plan.dependenciesJson, QString(),
         [self, name, repositoryUrl, targetVersion, catalogRow, epoch]
         (QVariantList resolved) {
             if (!self) return;
             if (self->m_dialogResolveEpoch.value(name) != epoch) {
                 qDebug() << "runResolverAndOpenDialog: dropping superseded epoch"
                          << epoch << "for" << name;
+                return;
+            }
+            const QString sourceError =
+                CatalogResolution::validateResolvedRows(resolved, repositoryUrl);
+            if (!sourceError.isEmpty()) {
+                self->presentCatalogResolutionError(
+                    name, repositoryUrl, targetVersion, catalogRow, sourceError,
+                    /*requestOpen=*/false);
                 return;
             }
             const QVariantList changes =
@@ -1573,8 +1603,10 @@ void PackageCoordinator::emitDialogMetadata(const QString& name,
         m_appsModel->setResolverOverlay(overlay);
     }
 
-    // Union in the catalog-derived dependency set.
-    for (const QVariant& v : collectCatalogRequired(name, repositoryUrl)) {
+    // The local selected-source plan is the required package set even before
+    // the asynchronous resolver returns. It deliberately never adds rows from
+    // another enabled repository.
+    for (const QVariant& v : m_requiredPackagesByTopLevel.value(name)) {
         const QString depName = v.toMap().value("name").toString();
         if (depName.isEmpty() || seen.contains(depName)) continue;
         seen.insert(depName);
@@ -1605,7 +1637,9 @@ void PackageCoordinator::refreshOverlayAfterInstall(const QString& topLevelName)
     // Only push UI updates while this app's dialog is still the active session.
     if (topLevelName != m_activeAddDialogName) return;
 
-    const QString repositoryUrl = m_repoByName.value(topLevelName);
+    const QString repositoryUrl =
+        m_selectedRepositoryByTopLevel.value(topLevelName);
+    if (repositoryUrl.isEmpty()) return;
     const QVariantMap catalogRow =
         m_appsModel->rowDataByName(topLevelName, repositoryUrl);
     emitDialogMetadata(topLevelName, repositoryUrl, QString(), catalogRow, changes,
@@ -1624,20 +1658,48 @@ void PackageCoordinator::confirmCatalogInstall(const QString& name,
         return;
     }
 
+    const CatalogResolution::Plan plan =
+        buildCatalogResolutionPlan(name, repositoryUrl, versionPins);
+    const QString targetVersion = versionPins.value(name).toString();
+    const QVariantMap catalogRow =
+        m_appsModel ? m_appsModel->rowDataByName(name, repositoryUrl) : QVariantMap{};
+    if (!plan.isValid()) {
+        presentCatalogResolutionError(
+            name, repositoryUrl, targetVersion, catalogRow, plan.error, /*requestOpen=*/false);
+        emit catalogInstallFailed(name, plan.error);
+        return;
+    }
+
+    m_selectedRepositoryByTopLevel.insert(name, repositoryUrl);
+    m_requiredPackagesByTopLevel.insert(name, plan.requiredPackages);
     m_installRegistry->begin(name, /*targetVersion=*/{}, /*targetHash=*/{},
                         /*startedByTopLevel=*/name);
     emit catalogInstallStageChanged(name, InstallStage::Downloading);
-
-    const QString depsJson = buildResolverDepsJson(name, repositoryUrl, versionPins);
 
     LogosModules logos(m_logosAPI);
     QPointer<PackageCoordinator> self(this);
     // Default IPC deadline (20s) is too tight when the catalog blob is many
     // MB or the user is on a slow connection
     constexpr int kDownloadIpcDeadlineMs = 5 * 60 * 1000;
-    logos.package_downloader.downloadResolvedDependenciesAsync(depsJson, QString(),
-        [self, name](QVariantList results) {
+    logos.package_downloader.downloadResolvedDependenciesAsync(plan.dependenciesJson, QString(),
+        [self, name, repositoryUrl, targetVersion, catalogRow](QVariantList results) {
             if (!self) return;
+
+            const QString sourceError =
+                CatalogResolution::validateResolvedRows(results, repositoryUrl);
+            if (!sourceError.isEmpty()) {
+                self->m_installRegistry->fail(name, sourceError);
+                emit self->catalogInstallStageChanged(name, InstallStage::Failed);
+                self->presentCatalogResolutionError(
+                    name, repositoryUrl, targetVersion, catalogRow, sourceError,
+                    /*requestOpen=*/false);
+                emit self->catalogInstallFailed(name, sourceError);
+                QTimer::singleShot(2500, self.data(), [self, name]() {
+                    if (!self) return;
+                    self->m_installRegistry->clearByTopLevel(name);
+                });
+                return;
+            }
             if (!results.isEmpty())
                 self->m_lastResolvedRawByName.insert(name, results);
 
