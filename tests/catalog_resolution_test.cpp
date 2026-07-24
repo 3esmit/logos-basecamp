@@ -9,6 +9,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QSet>
 #include <QtTest/QtTest>
 
 namespace {
@@ -55,6 +56,57 @@ class CatalogResolutionTest : public QObject {
     Q_OBJECT
 
 private slots:
+    void inspectorInstall_requiresCompleteMaintainedForkClosure()
+    {
+        const QString selected = CatalogResolution::maintainedRepositoryUrl();
+        const QString official = QStringLiteral("https://packages.logos.co/logos-repo.json");
+        const auto rows = CatalogResolution::indexCatalogRows({
+            packageRow(selected, QStringLiteral("logos_inspector_ui"),
+                       QStringLiteral("0.2.0-rc7"),
+                       {QStringLiteral("logos_inspector")}),
+            packageRow(selected, QStringLiteral("logos_inspector"),
+                       QStringLiteral("0.2.0-rc7"),
+                       {
+                           QStringLiteral("blockchain_module"),
+                           QStringLiteral("storage_module"),
+                           QStringLiteral("delivery_module"),
+                           QStringLiteral("lez_core"),
+                       }),
+            packageRow(selected, QStringLiteral("blockchain_module"), QStringLiteral("0.2.5")),
+            packageRow(selected, QStringLiteral("storage_module"), QStringLiteral("2.1.0")),
+            packageRow(selected, QStringLiteral("delivery_module"), QStringLiteral("0.1.5")),
+            packageRow(selected, QStringLiteral("lez_core"), QStringLiteral("0.3.1")),
+            packageRow(official, QStringLiteral("blockchain_module"), QStringLiteral("99.0.0")),
+            packageRow(official, QStringLiteral("storage_module"), QStringLiteral("99.0.0")),
+            packageRow(official, QStringLiteral("delivery_module"), QStringLiteral("99.0.0")),
+            packageRow(official, QStringLiteral("lez_core"), QStringLiteral("99.0.0")),
+        });
+
+        const CatalogResolution::Plan plan = CatalogResolution::buildPlan(
+            QStringLiteral("logos_inspector_ui"), selected, {}, rows);
+
+        QVERIFY2(plan.isValid(), qPrintable(plan.error));
+        QCOMPARE(plan.requiredPackages.size(), 6);
+
+        const QSet<QString> expected{
+            QStringLiteral("logos_inspector_ui"),
+            QStringLiteral("logos_inspector"),
+            QStringLiteral("blockchain_module"),
+            QStringLiteral("storage_module"),
+            QStringLiteral("delivery_module"),
+            QStringLiteral("lez_core"),
+        };
+        QSet<QString> resolved;
+        const QJsonArray request = parseRequest(plan);
+        QCOMPARE(request.size(), expected.size());
+        for (const QJsonValue& value : request) {
+            const QJsonObject entry = value.toObject();
+            QCOMPARE(entry.value(QStringLiteral("repositoryUrl")).toString(), selected);
+            resolved.insert(entry.value(QStringLiteral("name")).toString());
+        }
+        QCOMPARE(resolved, expected);
+    }
+
     void completeClosure_staysInSelectedRepository()
     {
         const QString selected = CatalogResolution::maintainedRepositoryUrl();
