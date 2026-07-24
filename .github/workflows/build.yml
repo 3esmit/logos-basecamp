@@ -35,8 +35,23 @@ jobs:
           set -euo pipefail
           test "$GITHUB_REF" = "refs/heads/master"
           version="$(tr -d '\n' < VERSION)"
-          if gh release view "$version" >/dev/null 2>&1; then
+          releases="$(
+            gh api --paginate --slurp \
+              "repos/$GITHUB_REPOSITORY/releases?per_page=100"
+          )"
+          if jq -e --arg tag "$version" \
+              'any(.[][]; .tag_name == $tag)' \
+              <<<"$releases" >/dev/null; then
             echo "Release $version already exists" >&2
+            exit 1
+          fi
+          refs="$(
+            gh api \
+              "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/$version"
+          )"
+          if jq -e --arg ref "refs/tags/$version" \
+              'any(.[]; .ref == $ref)' <<<"$refs" >/dev/null; then
+            echo "Tag $version already exists" >&2
             exit 1
           fi
 
@@ -247,20 +262,36 @@ jobs:
       cancel-in-progress: false
     permissions:
       contents: write
+    env:
+      GH_REPO: ${{ github.repository }}
 
     steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
       - name: Confirm version is still unpublished
-        id: release_guard
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.release_contract.outputs.version }}
         run: |
           set -euo pipefail
-          if gh release view "$VERSION" >/dev/null 2>&1; then
+          releases="$(
+            gh api --paginate --slurp \
+              "repos/$GH_REPO/releases?per_page=100"
+          )"
+          if jq -e --arg tag "$VERSION" \
+              'any(.[][]; .tag_name == $tag)' \
+              <<<"$releases" >/dev/null; then
             echo "Release $VERSION already exists" >&2
             exit 1
           fi
-          echo "cleanup=true" >> "$GITHUB_OUTPUT"
+          refs="$(
+            gh api "repos/$GH_REPO/git/matching-refs/tags/$VERSION"
+          )"
+          if jq -e --arg ref "refs/tags/$VERSION" \
+              'any(.[]; .ref == $ref)' <<<"$refs" >/dev/null; then
+            echo "Tag $VERSION already exists" >&2
+            exit 1
+          fi
 
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
@@ -282,30 +313,107 @@ jobs:
           cd artifacts
           sha256sum ./*.AppImage ./*.app.tar.gz > SHA256SUMS
 
-      - id: create_release
-        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
-        with:
-          tag_name: ${{ needs.release_contract.outputs.version }}
-          target_commitish: ${{ github.sha }}
-          name: Logos Basecamp ${{ needs.release_contract.outputs.version }}
-          draft: true
-          prerelease: true
-          make_latest: false
-          generate_release_notes: true
-          fail_on_unmatched_files: true
-          files: |
-            artifacts/*.AppImage
-            artifacts/*.app.tar.gz
-            artifacts/SHA256SUMS
-
-      - name: Verify and publish draft
+      - name: Create exact release tag
+        id: create_tag
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.release_contract.outputs.version }}
         run: |
           set -euo pipefail
+          gh api --method POST "repos/$GH_REPO/git/refs" \
+            -f ref="refs/tags/$VERSION" \
+            -f sha="$GITHUB_SHA" >/dev/null
+          echo "owned=true" >> "$GITHUB_OUTPUT"
+
+      - name: Create exact owned draft
+        id: create_release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.release_contract.outputs.version }}
+        run: |
+          set -euo pipefail
+          release_json="$(
+            gh api --method POST "repos/$GH_REPO/releases" \
+              -f tag_name="$VERSION" \
+              -f target_commitish="$GITHUB_SHA" \
+              -f name="Logos Basecamp $VERSION" \
+              -F draft=true \
+              -F prerelease=true \
+              -f make_latest=false \
+              -F generate_release_notes=true
+          )"
+          release_id="$(
+            jq -er '.id' <<<"$release_json"
+          )"
+          echo "id=$release_id" >> "$GITHUB_OUTPUT"
+          echo "owned=true" >> "$GITHUB_OUTPUT"
+
+      - name: Upload exact draft assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_ID: ${{ steps.create_release.outputs.id }}
+          VERSION: ${{ needs.release_contract.outputs.version }}
+        run: |
+          set -euo pipefail
+          test -n "$RELEASE_ID"
+          gh api "repos/$GH_REPO/releases/$RELEASE_ID" |
+            jq -e --arg tag "$VERSION" --argjson id "$RELEASE_ID" '
+              .id == $id and
+              .tag_name == $tag and
+              .draft == true and
+              .prerelease == true and
+              (.assets | length) == 0
+            ' >/dev/null
+          mapfile -t assets < <(
+            find artifacts -maxdepth 1 -type f -printf '%f\n' | sort
+          )
+          test "${#assets[@]}" -eq 4
+          test "$(printf '%s\n' "${assets[@]}" | grep -Ec '\.AppImage$')" -eq 2
+          test "$(printf '%s\n' "${assets[@]}" | grep -Ec '\.app\.tar\.gz$')" -eq 1
+          test "$(printf '%s\n' "${assets[@]}" | grep -Fxc 'SHA256SUMS')" -eq 1
+          for name in "${assets[@]}"; do
+            asset_json="$(
+              curl --fail-with-body --silent --show-error --location \
+                --request POST \
+                --header "Accept: application/vnd.github+json" \
+                --header "Authorization: Bearer $GH_TOKEN" \
+                --header "X-GitHub-Api-Version: 2022-11-28" \
+                --header "Content-Type: application/octet-stream" \
+                --data-binary @"artifacts/$name" \
+                "https://uploads.github.com/repos/$GH_REPO/releases/$RELEASE_ID/assets?name=$name"
+            )"
+            jq -e --arg name "$name" '
+              .name == $name and
+              .state == "uploaded"
+            ' <<<"$asset_json" >/dev/null
+          done
+
+      - name: Verify and publish draft
+        id: publish_release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_ID: ${{ steps.create_release.outputs.id }}
+          VERSION: ${{ needs.release_contract.outputs.version }}
+        run: |
+          set -euo pipefail
+          test -n "$RELEASE_ID"
+          release_json="$(
+            gh api "repos/$GH_REPO/releases/$RELEASE_ID"
+          )"
+          jq -e --arg tag "$VERSION" '
+            .tag_name == $tag and
+            .draft == true and
+            .prerelease == true and
+            (.assets | length) == 4
+          ' <<<"$release_json" >/dev/null
           mkdir published-artifacts
-          gh release download "$VERSION" --dir published-artifacts
+          jq -r '.assets[] | [.id, .name] | @tsv' \
+              <<<"$release_json" |
+            while IFS=$'\t' read -r asset_id asset_name; do
+              gh api -H "Accept: application/octet-stream" \
+                "repos/$GH_REPO/releases/assets/$asset_id" \
+                > "published-artifacts/$asset_name"
+            done
           test "$(find published-artifacts -maxdepth 1 -type f | wc -l)" -eq 4
           test "$(wc -l < published-artifacts/SHA256SUMS)" -eq 3
           (
@@ -313,15 +421,74 @@ jobs:
             sha256sum --check SHA256SUMS
           )
           tag_target="$(
-            gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$VERSION" \
+            gh api "repos/$GH_REPO/git/ref/tags/$VERSION" \
               --jq '.object.sha'
           )"
           test "$tag_target" = "$GITHUB_SHA"
-          gh release edit "$VERSION" --draft=false --prerelease --latest=false
+          gh api --method PATCH \
+            "repos/$GH_REPO/releases/$RELEASE_ID" \
+            -F draft=false \
+            -F prerelease=true \
+            -f make_latest=false >/dev/null
+          gh api "repos/$GH_REPO/releases/$RELEASE_ID" |
+            jq -e --arg tag "$VERSION" '
+              .tag_name == $tag and
+              .draft == false and
+              .prerelease == true and
+              (.assets | length) == 4
+            ' >/dev/null
+          published_tag_target="$(
+            gh api "repos/$GH_REPO/git/ref/tags/$VERSION" \
+              --jq '.object.sha'
+          )"
+          test "$published_tag_target" = "$GITHUB_SHA"
 
-      - name: Remove failed draft
-        if: failure() && steps.release_guard.outputs.cleanup == 'true'
+      - name: Roll back failed release
+        if: >-
+          always() &&
+          steps.create_tag.outputs.owned == 'true' &&
+          steps.publish_release.outcome != 'success'
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_ID: ${{ steps.create_release.outputs.id }}
+          RELEASE_OWNED: ${{ steps.create_release.outputs.owned }}
           VERSION: ${{ needs.release_contract.outputs.version }}
-        run: gh release delete "$VERSION" --yes --cleanup-tag || true
+        run: |
+          set -euo pipefail
+          cleanup_failed=0
+          can_delete_tag=true
+          if [[ "$RELEASE_OWNED" == "true" ]]; then
+            if [[ -z "$RELEASE_ID" ]]; then
+              echo "Owned release ID is missing" >&2
+              cleanup_failed=1
+              can_delete_tag=false
+            elif ! gh api --method DELETE \
+                "repos/$GH_REPO/releases/$RELEASE_ID"; then
+              cleanup_failed=1
+              can_delete_tag=false
+            fi
+          fi
+          if [[ "$can_delete_tag" == "true" ]] &&
+              ! git push --porcelain \
+                --force-with-lease="refs/tags/$VERSION:$GITHUB_SHA" \
+                origin ":refs/tags/$VERSION"; then
+            refs="[]"
+            if ! refs="$(
+              gh api "repos/$GH_REPO/git/matching-refs/tags/$VERSION"
+            )"; then
+              cleanup_failed=1
+            else
+              tag_target="$(
+                jq -r --arg ref "refs/tags/$VERSION" '
+                  first(.[] | select(.ref == $ref) | .object.sha) // empty
+                ' <<<"$refs"
+              )"
+              if [[ "$tag_target" == "$GITHUB_SHA" ]]; then
+                echo "Failed to delete the owned release tag" >&2
+                cleanup_failed=1
+              elif [[ -n "$tag_target" ]]; then
+                echo "Preserving tag moved to $tag_target" >&2
+              fi
+            fi
+          fi
+          exit "$cleanup_failed"
