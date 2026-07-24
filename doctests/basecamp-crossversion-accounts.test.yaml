@@ -134,11 +134,9 @@ sections:
             repo refresh
           ./result-lgpd/bin/lgpd \
             --config testdata/catalog/repositories.json \
-            --repo logos-3esmit-release \
-            list
+            repo list
         expect_contains:
-          - "accounts_module"
-          - "accounts_ui"
+          - "logos-3esmit-release"
 
   - title: "Build the basecamp bundle"
     step: true
@@ -183,7 +181,7 @@ sections:
           mkdir -p dl-accA
           ./result-lgpd/bin/lgpd \
             --config testdata/catalog/repositories.json \
-            --repo logos-3esmit-release \
+            --repo https://raw.githubusercontent.com/3esmit/logos-3esmit-release/main/logos-repo.json \
             download accounts_ui \
             -o dl-accA
           ls dl-accA
@@ -287,7 +285,7 @@ sections:
           mkdir -p dl-accB
           ./result-lgpd/bin/lgpd \
             --config testdata/catalog/repositories.json \
-            --repo logos-3esmit-release \
+            --repo https://raw.githubusercontent.com/3esmit/logos-3esmit-release/main/logos-repo.json \
             download accounts_module \
             -o dl-accB
           ls dl-accB
