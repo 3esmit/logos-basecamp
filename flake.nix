@@ -56,11 +56,9 @@
       # changes or is overridden via a path input.
       revOf = input: input.rev or input.dirtyRev or "dirty";
       buildInfo = {
-        # VERSION is only present on release branches. On master (pre-release
-        # CI builds) there is no VERSION file, so fall back to a
-        # "pre-release-{sha7}" string derived from self.rev — available on
-        # every clean CI checkout. Dirty local builds lack self.rev and get
-        # an empty string, which hides the badge (intentional for dev).
+        # Maintained branches track VERSION so builds and release tags expose
+        # one identity. Keep the revision fallback for older or exported
+        # source trees that do not contain the version file.
         version = if builtins.pathExists ./VERSION
           then nixpkgs.lib.removeSuffix "\n" (builtins.readFile ./VERSION)
           else if (self ? rev) then "pre-release-${builtins.substring 0 7 self.rev}" else "";
