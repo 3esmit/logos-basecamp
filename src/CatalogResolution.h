@@ -31,9 +31,10 @@ Plan buildPlan(const QString& name,
                const QVariantMap& versionPins,
                const CatalogRows& catalogRows);
 
-// A downloader response is trusted only when every successful row identifies
-// the same selected repository that was requested.
+// A downloader response is trusted only when it contains exactly the planned
+// package set and every successful row identifies the selected repository.
 QString validateResolvedRows(const QVariantList& resolved,
-                             const QString& repositoryUrl);
+                             const QString& repositoryUrl,
+                             const QVariantList& requiredPackages);
 
 } // namespace CatalogResolution

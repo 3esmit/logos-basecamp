@@ -169,18 +169,64 @@ Plan buildPlan(const QString& name,
 }
 
 QString validateResolvedRows(const QVariantList& resolved,
-                             const QString& repositoryUrl)
+                             const QString& repositoryUrl,
+                             const QVariantList& requiredPackages)
 {
+    if (requiredPackages.isEmpty())
+        return QStringLiteral("The selected repository package plan is empty.");
+
+    QSet<QString> expected;
+    expected.reserve(requiredPackages.size());
+    for (const QVariant& value : requiredPackages) {
+        const QVariantMap required = value.toMap();
+        const QString name = required.value(QStringLiteral("name")).toString();
+        if (name.isEmpty())
+            return QStringLiteral("The selected repository package plan contains an unnamed package.");
+        if (required.value(QStringLiteral("repositoryUrl")).toString() != repositoryUrl) {
+            return QStringLiteral("Package \"%1\" is outside the selected repository plan.")
+                .arg(name);
+        }
+        expected.insert(name);
+    }
+
+    QSet<QString> seen;
+    seen.reserve(resolved.size());
     for (const QVariant& value : resolved) {
         const QVariantMap row = value.toMap();
-        if (!row.value(QStringLiteral("error")).toString().isEmpty()) continue;
+        const QString name = row.value(QStringLiteral("name")).toString();
+        if (name.isEmpty())
+            return QStringLiteral("Resolver returned an unnamed package.");
+        if (!expected.contains(name)) {
+            return QStringLiteral("Resolver returned unexpected package \"%1\".")
+                .arg(name);
+        }
+        if (seen.contains(name)) {
+            return QStringLiteral("Resolver returned duplicate package \"%1\".")
+                .arg(name);
+        }
+        seen.insert(name);
+
+        const QString rowError = row.value(QStringLiteral("error")).toString();
+        if (!rowError.isEmpty()) {
+            return QStringLiteral("Package \"%1\" could not be resolved: %2")
+                .arg(name, rowError);
+        }
 
         const QString sourceRepository = row.value(QStringLiteral("repositoryUrl")).toString();
         if (sourceRepository != repositoryUrl) {
             return QStringLiteral("Resolver selected package \"%1\" from a different repository.")
-                .arg(row.value(QStringLiteral("name")).toString());
+                .arg(name);
         }
     }
+
+    for (const QVariant& value : requiredPackages) {
+        const QString name = value.toMap().value(QStringLiteral("name")).toString();
+        if (!seen.contains(name)) {
+            return QStringLiteral("Resolver omitted required package \"%1\".")
+                .arg(name);
+        }
+    }
+
     return {};
 }
 
