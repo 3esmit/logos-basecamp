@@ -2,12 +2,14 @@
 
 ## Download
 
-Prebuilt binaries for Linux (AppImage) and macOS (DMG):
+Prebuilt binaries for Linux (AppImage) and Apple-silicon macOS:
 
-- **Stable release** — [latest release](https://github.com/logos-co/logos-basecamp/releases/latest)
-- **Latest RC / development build** — [all releases](https://github.com/logos-co/logos-basecamp/releases)
+- **Maintained alpha builds** — [all releases](https://github.com/3esmit/logos-basecamp/releases)
+- **Upstream stable release** — [latest upstream release](https://github.com/logos-co/logos-basecamp/releases/latest)
 
-Release candidates are marked as pre-release, so `/releases/latest` skips them. If the stable release is significantly older than the RCs on the releases page, you probably want an RC.
+Maintained builds remain alpha prereleases while package installation and
+application workflows complete end-to-end qualification. Each release includes
+a `SHA256SUMS` file covering every downloadable application bundle.
 
 ## How to Build
 

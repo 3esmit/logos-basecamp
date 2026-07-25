@@ -3,7 +3,8 @@
 
 {
   pname = "logos-basecamp";
-  # VERSION is only present on release branches; dev branches use a placeholder.
+  # Maintained branches track VERSION; keep the placeholder for exported or
+  # older source trees that do not contain it.
   version = if builtins.pathExists ../VERSION
     then pkgs.lib.removeSuffix "\n" (builtins.readFile ../VERSION)
     else "0.0.0-dev";
