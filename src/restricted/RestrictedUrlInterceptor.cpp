@@ -6,6 +6,8 @@
 #include <QRegularExpression>
 #include <QTextStream>
 
+#include "restricted/VerifiedAssetImageProvider.h"
+
 Q_LOGGING_CATEGORY(lcBasecampSandbox, "logos.basecamp.sandbox")
 
 namespace {
@@ -77,6 +79,18 @@ bool RestrictedUrlInterceptor::qmldirDeclaresNativePlugin(const QString& qmldirP
     return false;
 }
 
+bool RestrictedUrlInterceptor::isVerifiedAssetUrl(const QUrl& url) const
+{
+    static const QRegularExpression handleExpression(QStringLiteral("^/[a-f0-9]{64}$"));
+    return url.scheme() == QLatin1String("image")
+        && url.host() == QLatin1String(VerifiedAssetImageProvider::kProviderName)
+        && url.userInfo().isEmpty()
+        && url.port() == -1
+        && url.query().isEmpty()
+        && url.fragment().isEmpty()
+        && handleExpression.match(url.path(QUrl::FullyEncoded)).hasMatch();
+}
+
 QUrl RestrictedUrlInterceptor::intercept(const QUrl& url, DataType type)
 {
     if (!url.isValid()) {
@@ -84,6 +98,13 @@ QUrl RestrictedUrlInterceptor::intercept(const QUrl& url, DataType type)
     }
 
     if (url.scheme() == QLatin1String("qrc")) {
+        return url;
+    }
+
+    // The provider is registered by Basecamp for each sandboxed QML engine and
+    // validates a digest-handle against that app's private verified cache. It
+    // is the only non-file URL admitted to an untrusted ui_qml engine.
+    if (isVerifiedAssetUrl(url)) {
         return url;
     }
 

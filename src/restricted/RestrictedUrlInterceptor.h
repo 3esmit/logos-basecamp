@@ -33,6 +33,7 @@ public:
 private:
     bool isUnder(const QString& canonicalPath, const QStringList& roots) const;
     bool qmldirDeclaresNativePlugin(const QString& qmldirPath) const;
+    bool isVerifiedAssetUrl(const QUrl& url) const;
 
     QStringList m_allowedRoots;
     QStringList m_untrustedRoots;

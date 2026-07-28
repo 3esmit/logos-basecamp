@@ -37,9 +37,12 @@
 #include <QtTest/QtTest>
 
 #include <QCoreApplication>
+#include <QBuffer>
+#include <QCryptographicHash>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QImage>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
@@ -52,6 +55,7 @@
 #include <QUrl>
 
 #include "restricted/QmlSandbox.h"
+#include "restricted/VerifiedAssetImageProvider.h"
 
 namespace {
 
@@ -74,6 +78,27 @@ void writeFile(const QString& path, const QString& contents)
     QVERIFY2(f.open(QIODevice::WriteOnly | QIODevice::Text),
              qPrintable(QStringLiteral("cannot write ") + path));
     QTextStream(&f) << contents;
+}
+
+void writeBytes(const QString& path, const QByteArray& contents)
+{
+    QFile file(path);
+    QVERIFY2(file.open(QIODevice::WriteOnly),
+             qPrintable(QStringLiteral("cannot write ") + path));
+    QCOMPARE(file.write(contents), contents.size());
+}
+
+QByteArray encodedImage(const QSize& size, QImage::Format format,
+                        const QColor& color, const char* imageFormat)
+{
+    QImage image(size, format);
+    if (image.isNull())
+        return {};
+    image.fill(color);
+    QBuffer buffer;
+    if (!buffer.open(QIODevice::WriteOnly) || !image.save(&buffer, imageFormat))
+        return {};
+    return buffer.data();
 }
 
 // Source dir of the evil_app fixture (tests/sandbox/evil_app). Provided by CMake
@@ -480,6 +505,96 @@ private slots:
         const QUrl out =
             engine.interceptUrl(qrc, QQmlAbstractUrlInterceptor::QmlFile);
         QCOMPARE(out, qrc);
+    }
+
+    // The verified asset provider is the only extra URL capability granted to
+    // sandboxed QML. It accepts a strict digest-shaped handle and no authority,
+    // query, fragment, or alternate provider name.
+    void sandboxAllowsOnlyStrictVerifiedAssetHandle()
+    {
+        QTemporaryDir dir(workRoot() + QStringLiteral("/tst_qml_sandbox-XXXXXX"));
+        QVERIFY(dir.isValid());
+
+        QQmlEngine engine;
+        QmlSandbox::configure(&engine, dir.path(), dir.path() + "/view.qml",
+                              /*appLibDir=*/QString());
+        const QString digest(64, QLatin1Char('a'));
+        const QUrl valid(QStringLiteral("image://basecamp-verified/") + digest);
+        QCOMPARE(engine.interceptUrl(valid, QQmlAbstractUrlInterceptor::UrlString), valid);
+
+        const QList<QUrl> rejected = {
+            QUrl(QStringLiteral("image://other-provider/") + digest),
+            QUrl(QStringLiteral("image://basecamp-verified/not-a-digest")),
+            QUrl(QStringLiteral("image://basecamp-verified/") + digest + "?x=1"),
+            QUrl(QStringLiteral("image://basecamp-verified/") + digest + "#fragment"),
+            QUrl(QStringLiteral("image://basecamp-verified@attacker/") + digest),
+        };
+        for (const QUrl& url : rejected) {
+            QVERIFY2(engine.interceptUrl(url, QQmlAbstractUrlInterceptor::UrlString).isEmpty(),
+                     qPrintable(QStringLiteral("SANDBOX BREACH: unexpected image URL was allowed: ")
+                                + url.toString()));
+        }
+    }
+
+    // The provider reads only a canonical PNG inside its app-specific root,
+    // verifies the bytes against the QML-visible digest handle, then enforces
+    // a decoded pixel budget. Replacing a cached file cannot alter an already
+    // issued handle because the digest check fails closed.
+    void verifiedAssetProviderRejectsUntrustedCacheInputs()
+    {
+        QTemporaryDir cacheDir(workRoot() + QStringLiteral("/tst_verified_assets-XXXXXX"));
+        QVERIFY(cacheDir.isValid());
+        VerifiedAssetImageProvider provider(cacheDir.path());
+
+        const QByteArray redPng = encodedImage(QSize(2, 1), QImage::Format_RGBA8888,
+                                                QColor(Qt::red), "PNG");
+        QVERIFY2(!redPng.isEmpty(), "failed to create valid PNG fixture");
+        const QString redDigest = QString::fromLatin1(
+            QCryptographicHash::hash(redPng, QCryptographicHash::Sha256).toHex());
+        const QString redPath = cacheDir.path() + QLatin1Char('/') + redDigest + ".png";
+        writeBytes(redPath, redPng);
+
+        QSize servedSize;
+        const QImage served = provider.requestImage(redDigest, &servedSize, {});
+        QVERIFY2(!served.isNull(), "valid digest-addressed PNG did not render");
+        QCOMPARE(servedSize, QSize(2, 1));
+        QCOMPARE(served.pixelColor(0, 0), QColor(Qt::red));
+        QVERIFY(provider.requestImage(QStringLiteral("../etc/passwd"), nullptr, {}).isNull());
+
+        const QByteArray bluePng = encodedImage(QSize(2, 1), QImage::Format_RGBA8888,
+                                                 QColor(Qt::blue), "PNG");
+        QVERIFY2(!bluePng.isEmpty(), "failed to create replacement PNG fixture");
+        writeBytes(redPath, bluePng);
+        QVERIFY2(provider.requestImage(redDigest, nullptr, {}).isNull(),
+                 "cache replacement changed the bytes behind a digest handle");
+
+        const QByteArray jpeg = encodedImage(QSize(2, 1), QImage::Format_RGB32,
+                                              QColor(Qt::green), "JPEG");
+        QVERIFY2(!jpeg.isEmpty(), "failed to create JPEG fixture");
+        const QString jpegDigest = QString::fromLatin1(
+            QCryptographicHash::hash(jpeg, QCryptographicHash::Sha256).toHex());
+        writeBytes(cacheDir.path() + QLatin1Char('/') + jpegDigest + ".png", jpeg);
+        QVERIFY2(provider.requestImage(jpegDigest, nullptr, {}).isNull(),
+                 "MIME-confused JPEG was accepted as a verified PNG");
+
+        QTemporaryDir outsideDir(workRoot() + QStringLiteral("/tst_verified_assets-outside-XXXXXX"));
+        QVERIFY(outsideDir.isValid());
+        const QString outsidePath = outsideDir.path() + QStringLiteral("/asset.png");
+        writeBytes(outsidePath, redPng);
+        QVERIFY(QFile::remove(redPath));
+        QVERIFY2(QFile::link(outsidePath, redPath),
+                 "failed to create cache-escape link fixture");
+        QVERIFY2(provider.requestImage(redDigest, nullptr, {}).isNull(),
+                 "symlinked asset outside the app cache root was accepted");
+
+        const QByteArray oversizedPng = encodedImage(
+            QSize(4097, 4096), QImage::Format_RGBA8888, QColor(Qt::black), "PNG");
+        QVERIFY2(!oversizedPng.isEmpty(), "failed to create oversized PNG fixture");
+        const QString oversizedDigest = QString::fromLatin1(
+            QCryptographicHash::hash(oversizedPng, QCryptographicHash::Sha256).toHex());
+        writeBytes(cacheDir.path() + QLatin1Char('/') + oversizedDigest + ".png", oversizedPng);
+        QVERIFY2(provider.requestImage(oversizedDigest, nullptr, {}).isNull(),
+                 "oversized decoded raster was accepted");
     }
 
     // ----------------------------------------------------------------------
