@@ -1,6 +1,6 @@
 #include "UIPluginManager.h"
 #include "CoreModuleManager.h"
-#include "restricted/VerifiedAssetImageProvider.h"
+#include "restricted/VerifiedAssetProducerMetadata.h"
 #include "PackageCoordinator.h"
 #include "PluginLoader.h"
 
@@ -211,8 +211,8 @@ void UIPluginManager::loadUiModule(const QString& moduleName)
             request.mainFilePath = meta.value("mainFilePath").toString();
         request.coreDependencies = meta.value("dependencies").toList();
         QString producerError;
-        if (!VerifiedAssetImageProvider::validateProducerDeclarations(
-                meta.value("verified_asset_producers").toList(),
+        if (!VerifiedAssetProducerMetadata::resolve(
+                meta,
                 request.coreDependencies,
                 &request.verifiedAssetProducers,
                 &producerError)) {

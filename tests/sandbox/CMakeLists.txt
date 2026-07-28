@@ -35,6 +35,7 @@ add_executable(tst_qml_sandbox
     ${BASECAMP_SRC}/restricted/QmlSandbox.cpp
     ${BASECAMP_SRC}/restricted/RestrictedUrlInterceptor.cpp
     ${BASECAMP_SRC}/restricted/VerifiedAssetImageProvider.cpp
+    ${BASECAMP_SRC}/restricted/VerifiedAssetProducerMetadata.cpp
     ${BASECAMP_SRC}/restricted/DenyAllNAMFactory.cpp
     ${BASECAMP_SRC}/restricted/DenyAllNetworkAccessManager.cpp
     ${BASECAMP_SRC}/restricted/DenyAllReply.cpp
@@ -69,6 +70,10 @@ foreach(slot
     sandboxAllowsOnlyStrictVerifiedAssetHandle
     verifiedAssetProviderRejectsUntrustedCacheInputs
     verifiedAssetProviderUsesOnlyDeclaredProducerRoots
+    verifiedAssetProducerMetadataRecoversInstalledVariantDeclaration
+    verifiedAssetProducerMetadataRejectsInvalidDeclarations
+    verifiedAssetProducerMetadataRejectsUnsafeFiles
+    verifiedAssetProducerMetadataRejectsMalformedAndOversizedJson
     evilApp_allProbesBlocked
     evilApp_qmldirPluginImportRejected)
   add_test(NAME qml_sandbox.${slot} COMMAND tst_qml_sandbox ${slot})

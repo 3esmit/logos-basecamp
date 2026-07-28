@@ -130,6 +130,7 @@ set(SOURCES
     restricted/RestrictedUrlInterceptor.cpp
     restricted/QmlSandbox.cpp
     restricted/VerifiedAssetImageProvider.cpp
+    restricted/VerifiedAssetProducerMetadata.cpp
 )
 
 # Add SDK sources based on layout type

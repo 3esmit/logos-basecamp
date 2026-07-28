@@ -56,6 +56,7 @@
 
 #include "restricted/QmlSandbox.h"
 #include "restricted/VerifiedAssetImageProvider.h"
+#include "restricted/VerifiedAssetProducerMetadata.h"
 
 namespace {
 
@@ -628,6 +629,155 @@ private slots:
         QCOMPARE(roots.size(), 1);
         QVERIFY(roots.at(0).endsWith(QStringLiteral("/palace_core/instance-a")));
         QVERIFY(!roots.at(0).contains(QStringLiteral("unrelated_core")));
+    }
+
+    void verifiedAssetProducerMetadataRecoversInstalledVariantDeclaration()
+    {
+        QTemporaryDir installDir(
+            workRoot() + QStringLiteral("/tst_verified_metadata-XXXXXX"));
+        QVERIFY(installDir.isValid());
+        writeFile(
+            installDir.path() + QStringLiteral("/metadata.json"),
+            QStringLiteral(R"({"verified_asset_producers":["palace_core"]})"));
+
+        const QVariantMap packageMetadata{
+            {QStringLiteral("installDir"), installDir.path()}};
+        const QVariantList directDependencies{QStringLiteral("palace_core")};
+        QStringList producers;
+        QString error;
+        QVERIFY2(VerifiedAssetProducerMetadata::resolve(
+                     packageMetadata, directDependencies, &producers, &error),
+                 qPrintable(error));
+        QCOMPARE(producers, QStringList{QStringLiteral("palace_core")});
+
+        QVariantMap ipcMetadata = packageMetadata;
+        ipcMetadata.insert(
+            QStringLiteral("verified_asset_producers"),
+            QVariantList{QStringLiteral("palace_core")});
+        writeFile(installDir.path() + QStringLiteral("/metadata.json"),
+                  QStringLiteral(R"({"verified_asset_producers":"invalid"})"));
+        QVERIFY2(VerifiedAssetProducerMetadata::resolve(
+                     ipcMetadata, directDependencies, &producers, &error),
+                 qPrintable(error));
+        QCOMPARE(producers, QStringList{QStringLiteral("palace_core")});
+
+        writeFile(installDir.path() + QStringLiteral("/metadata.json"),
+                  QStringLiteral(R"({"name":"no-capability-ui"})"));
+        QVERIFY2(VerifiedAssetProducerMetadata::resolve(
+                     packageMetadata, directDependencies, &producers, &error),
+                 qPrintable(error));
+        QVERIFY(producers.isEmpty());
+    }
+
+    void verifiedAssetProducerMetadataRejectsInvalidDeclarations()
+    {
+        QTemporaryDir installDir(
+            workRoot() + QStringLiteral("/tst_verified_metadata-invalid-XXXXXX"));
+        QVERIFY(installDir.isValid());
+        const QString metadataPath =
+            installDir.path() + QStringLiteral("/metadata.json");
+        const QVariantMap packageMetadata{
+            {QStringLiteral("installDir"), installDir.path()}};
+        const QVariantList directDependencies{QStringLiteral("palace_core")};
+        QStringList producers;
+        QString error;
+
+        writeFile(metadataPath,
+                  QStringLiteral(R"({"verified_asset_producers":"palace_core"})"));
+        QVERIFY(!VerifiedAssetProducerMetadata::resolve(
+            packageMetadata, directDependencies, &producers, &error));
+        QVERIFY(error.contains(QStringLiteral("must be an array")));
+
+        writeFile(metadataPath,
+                  QStringLiteral(R"({"verified_asset_producers":[7]})"));
+        QVERIFY(!VerifiedAssetProducerMetadata::resolve(
+            packageMetadata, directDependencies, &producers, &error));
+        QVERIFY(error.contains(QStringLiteral("entries must be strings")));
+
+        writeFile(
+            metadataPath,
+            QStringLiteral(R"({"verified_asset_producers":["unrelated_core"]})"));
+        QVERIFY(!VerifiedAssetProducerMetadata::resolve(
+            packageMetadata, directDependencies, &producers, &error));
+        QVERIFY(error.contains(QStringLiteral("direct core dependency")));
+
+        QVariantMap malformedCatalogMetadata = packageMetadata;
+        malformedCatalogMetadata.insert(
+            QStringLiteral("verified_asset_producers"),
+            QStringLiteral("palace_core"));
+        QVERIFY(!VerifiedAssetProducerMetadata::resolve(
+            malformedCatalogMetadata, directDependencies, &producers, &error));
+        QVERIFY(error.contains(QStringLiteral("must be an array")));
+    }
+
+    void verifiedAssetProducerMetadataRejectsUnsafeFiles()
+    {
+        QTemporaryDir installDir(
+            workRoot() + QStringLiteral("/tst_verified_metadata-files-XXXXXX"));
+        QTemporaryDir outsideDir(
+            workRoot() + QStringLiteral("/tst_verified_metadata-outside-XXXXXX"));
+        QVERIFY(installDir.isValid());
+        QVERIFY(outsideDir.isValid());
+        const QString metadataPath =
+            installDir.path() + QStringLiteral("/metadata.json");
+        const QString outsidePath =
+            outsideDir.path() + QStringLiteral("/metadata.json");
+        const QVariantMap packageMetadata{
+            {QStringLiteral("installDir"), installDir.path()}};
+        const QVariantList directDependencies{QStringLiteral("palace_core")};
+        QStringList producers;
+        QString error;
+
+        writeFile(
+            outsidePath,
+            QStringLiteral(R"({"verified_asset_producers":["palace_core"]})"));
+        QVERIFY(QFile::link(outsidePath, metadataPath));
+        QVERIFY(QFileInfo(metadataPath).isSymLink());
+        QVERIFY(!VerifiedAssetProducerMetadata::resolve(
+            packageMetadata, directDependencies, &producers, &error));
+        QVERIFY(error.contains(QStringLiteral("escapes installDir")));
+
+        QVERIFY(QFile::remove(metadataPath));
+        const QString insideTarget =
+            installDir.path() + QStringLiteral("/real-metadata.json");
+        writeFile(
+            insideTarget,
+            QStringLiteral(R"({"verified_asset_producers":["palace_core"]})"));
+        QVERIFY(QFile::link(insideTarget, metadataPath));
+        QVERIFY(QFileInfo(metadataPath).isSymLink());
+        QVERIFY(!VerifiedAssetProducerMetadata::resolve(
+            packageMetadata, directDependencies, &producers, &error));
+        QVERIFY(error.contains(QStringLiteral("must not be a symlink")));
+
+        QVERIFY(QFile::remove(metadataPath));
+        QVERIFY(QDir().mkpath(metadataPath));
+        QVERIFY(!VerifiedAssetProducerMetadata::resolve(
+            packageMetadata, directDependencies, &producers, &error));
+        QVERIFY(error.contains(QStringLiteral("not a regular file")));
+    }
+
+    void verifiedAssetProducerMetadataRejectsMalformedAndOversizedJson()
+    {
+        QTemporaryDir installDir(
+            workRoot() + QStringLiteral("/tst_verified_metadata-json-XXXXXX"));
+        QVERIFY(installDir.isValid());
+        const QString metadataPath =
+            installDir.path() + QStringLiteral("/metadata.json");
+        const QVariantMap packageMetadata{
+            {QStringLiteral("installDir"), installDir.path()}};
+        const QVariantList directDependencies{QStringLiteral("palace_core")};
+        QStringList producers;
+        QString error;
+
+        writeFile(metadataPath, QStringLiteral("{not-json"));
+        QVERIFY(!VerifiedAssetProducerMetadata::resolve(
+            packageMetadata, directDependencies, &producers, &error));
+        QVERIFY(error.contains(QStringLiteral("not a JSON object")));
+
+        writeBytes(metadataPath, QByteArray(64 * 1024 + 1, ' '));
+        QVERIFY(!VerifiedAssetProducerMetadata::resolve(
+            packageMetadata, directDependencies, &producers, &error));
+        QVERIFY(error.contains(QStringLiteral("exceeds size bounds")));
     }
 
     // ----------------------------------------------------------------------
