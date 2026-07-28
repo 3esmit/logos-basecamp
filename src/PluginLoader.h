@@ -25,6 +25,7 @@ struct PluginLoadRequest {
     QString pluginPath;
     QString iconPath;
     QVariantList coreDependencies;
+    QStringList verifiedAssetProducers;
 
     // ui_qml module fields
     QString installDir;      // Module install directory (import paths root)

@@ -313,7 +313,9 @@ void PluginLoader::loadQmlView(const PluginLoadRequest& request,
         engine->addImageProvider(
             QString::fromLatin1(VerifiedAssetImageProvider::kProviderName),
             new VerifiedAssetImageProvider(
-                VerifiedAssetImageProvider::assetDirectoryForApp(request.name)));
+                request.name,
+                VerifiedAssetImageProvider::producerPersistenceRoots(
+                    request.name, request.verifiedAssetProducers)));
         engine->setBaseUrl(QUrl::fromLocalFile(request.installDir + "/"));
     }
 

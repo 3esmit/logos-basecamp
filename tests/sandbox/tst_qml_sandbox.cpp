@@ -544,14 +544,17 @@ private slots:
     {
         QTemporaryDir cacheDir(workRoot() + QStringLiteral("/tst_verified_assets-XXXXXX"));
         QVERIFY(cacheDir.isValid());
-        VerifiedAssetImageProvider provider(cacheDir.path());
+        const QString appName = QStringLiteral("trusted_ui");
+        const QString assetDir = cacheDir.path() + QStringLiteral("/verified_assets/") + appName;
+        QVERIFY(QDir().mkpath(assetDir));
+        VerifiedAssetImageProvider provider(appName, {cacheDir.path()});
 
         const QByteArray redPng = encodedImage(QSize(2, 1), QImage::Format_RGBA8888,
                                                 QColor(Qt::red), "PNG");
         QVERIFY2(!redPng.isEmpty(), "failed to create valid PNG fixture");
         const QString redDigest = QString::fromLatin1(
             QCryptographicHash::hash(redPng, QCryptographicHash::Sha256).toHex());
-        const QString redPath = cacheDir.path() + QLatin1Char('/') + redDigest + ".png";
+        const QString redPath = assetDir + QLatin1Char('/') + redDigest + ".png";
         writeBytes(redPath, redPng);
 
         QSize servedSize;
@@ -573,7 +576,7 @@ private slots:
         QVERIFY2(!jpeg.isEmpty(), "failed to create JPEG fixture");
         const QString jpegDigest = QString::fromLatin1(
             QCryptographicHash::hash(jpeg, QCryptographicHash::Sha256).toHex());
-        writeBytes(cacheDir.path() + QLatin1Char('/') + jpegDigest + ".png", jpeg);
+        writeBytes(assetDir + QLatin1Char('/') + jpegDigest + ".png", jpeg);
         QVERIFY2(provider.requestImage(jpegDigest, nullptr, {}).isNull(),
                  "MIME-confused JPEG was accepted as a verified PNG");
 
@@ -592,9 +595,39 @@ private slots:
         QVERIFY2(!oversizedPng.isEmpty(), "failed to create oversized PNG fixture");
         const QString oversizedDigest = QString::fromLatin1(
             QCryptographicHash::hash(oversizedPng, QCryptographicHash::Sha256).toHex());
-        writeBytes(cacheDir.path() + QLatin1Char('/') + oversizedDigest + ".png", oversizedPng);
+        writeBytes(assetDir + QLatin1Char('/') + oversizedDigest + ".png", oversizedPng);
         QVERIFY2(provider.requestImage(oversizedDigest, nullptr, {}).isNull(),
                  "oversized decoded raster was accepted");
+    }
+
+    void verifiedAssetProviderUsesOnlyDeclaredProducerRoots()
+    {
+        QTemporaryDir moduleDataDir(workRoot() + QStringLiteral("/tst_verified_producers-XXXXXX"));
+        QVERIFY(moduleDataDir.isValid());
+        QVERIFY(QDir().mkpath(moduleDataDir.path() + QStringLiteral("/palace_core/instance-a")));
+        QVERIFY(QDir().mkpath(moduleDataDir.path() + QStringLiteral("/unrelated_core/instance-b")));
+
+        QStringList producers;
+        QString error;
+        QVERIFY(VerifiedAssetImageProvider::validateProducerDeclarations(
+            {QStringLiteral("palace_core")},
+            {QStringLiteral("palace_core"), QStringLiteral("unrelated_core")},
+            &producers, &error));
+        QCOMPARE(producers, QStringList{QStringLiteral("palace_core")});
+        QVERIFY2(!VerifiedAssetImageProvider::validateProducerDeclarations(
+                     {QStringLiteral("unrelated_core")},
+                     {QStringLiteral("palace_core")}, &producers, &error),
+                 "producer outside direct dependencies was accepted");
+        QVERIFY2(!VerifiedAssetImageProvider::validateProducerDeclarations(
+                     {QStringLiteral("palace_core"), QStringLiteral("palace_core")},
+                     {QStringLiteral("palace_core")}, &producers, &error),
+                 "duplicate producer declaration was accepted");
+
+        const QStringList roots = VerifiedAssetImageProvider::producerPersistenceRoots(
+            QStringLiteral("logos_palace_ui"), {QStringLiteral("palace_core")}, moduleDataDir.path());
+        QCOMPARE(roots.size(), 1);
+        QVERIFY(roots.at(0).endsWith(QStringLiteral("/palace_core/instance-a")));
+        QVERIFY(!roots.at(0).contains(QStringLiteral("unrelated_core")));
     }
 
     // ----------------------------------------------------------------------

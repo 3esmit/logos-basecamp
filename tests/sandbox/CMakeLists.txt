@@ -68,6 +68,7 @@ foreach(slot
     sandboxAllowsQrcScheme
     sandboxAllowsOnlyStrictVerifiedAssetHandle
     verifiedAssetProviderRejectsUntrustedCacheInputs
+    verifiedAssetProviderUsesOnlyDeclaredProducerRoots
     evilApp_allProbesBlocked
     evilApp_qmldirPluginImportRejected)
   add_test(NAME qml_sandbox.${slot} COMMAND tst_qml_sandbox ${slot})

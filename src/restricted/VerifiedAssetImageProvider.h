@@ -2,31 +2,41 @@
 
 #include <QQuickImageProvider>
 #include <QString>
+#include <QStringList>
+#include <QVariantList>
 
 // A QML image provider for runtime assets prepared by an application's trusted
-// backend. The QML sandbox permits only image://basecamp-verified/<sha256>;
-// this provider is registered once per sandboxed QML engine and is rooted in
-// that application's cache directory, so one app cannot resolve another app's
-// assets.
+// backend. The QML sandbox permits only image://basecamp-verified/<sha256>.
+// The provider receives only persistence roots of core modules declared by the
+// UI application's `verified_asset_producers` metadata field, so one app
+// cannot resolve arbitrary module-data or another app's assets.
 //
-// Producers atomically stage a decoded PNG as <lowercase-sha256>.png in the
-// root returned by assetDirectoryForApp(). The provider independently verifies
-// the path, byte hash, detected format, and decoded dimensions before returning
-// pixels. QML never receives a filesystem path or an arbitrary URL.
+// A producer atomically stages a decoded PNG as <lowercase-sha256>.png under
+// its own `verified_assets/<ui-app-name>/` directory. The provider
+// independently verifies the path, byte hash, detected format, and decoded
+// dimensions before returning pixels. QML never receives a filesystem path or
+// arbitrary URL.
 class VerifiedAssetImageProvider final : public QQuickImageProvider {
 public:
     static constexpr const char* kProviderName = "basecamp-verified";
 
-    explicit VerifiedAssetImageProvider(QString assetRoot);
+    VerifiedAssetImageProvider(QString appName, QStringList producerPersistenceRoots);
 
-    // Public cache contract for a trusted core/UI backend. This directory is
-    // intentionally never added to QML's filesystem roots; it is reachable
-    // only through a digest handle served by this provider.
-    static QString assetDirectoryForApp(const QString& appName);
+    static bool validateProducerDeclarations(const QVariantList& declaredProducers,
+                                             const QVariantList& directDependencies,
+                                             QStringList* producers,
+                                             QString* error);
+
+    // Resolves only existing persistence directories belonging to the named
+    // producer modules. `moduleDataRoot` is injectable for tests.
+    static QStringList producerPersistenceRoots(const QString& appName,
+                                                const QStringList& producers,
+                                                const QString& moduleDataRoot = {});
 
     QImage requestImage(const QString& id, QSize* size,
                         const QSize& requestedSize) override;
 
 private:
-    QString m_assetRoot;
+    QString m_appName;
+    QStringList m_producerPersistenceRoots;
 };

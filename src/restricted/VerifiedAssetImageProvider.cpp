@@ -6,7 +6,10 @@
 #include <QFileInfo>
 #include <QImageReader>
 #include <QLoggingCategory>
+#include <QMetaType>
 #include <QRegularExpression>
+#include <QSet>
+#include <QVariant>
 
 #include "LogosBasecampPaths.h"
 
@@ -49,20 +52,105 @@ bool hasSafeDecodedSize(const QSize& decodedSize)
 
 } // namespace
 
-VerifiedAssetImageProvider::VerifiedAssetImageProvider(QString assetRoot)
+VerifiedAssetImageProvider::VerifiedAssetImageProvider(
+    QString appName, QStringList producerPersistenceRoots)
     : QQuickImageProvider(QQuickImageProvider::Image)
-    , m_assetRoot(QDir(assetRoot).canonicalPath())
+    , m_appName(std::move(appName))
 {
+    QSet<QString> seen;
+    for (const QString& root : producerPersistenceRoots) {
+        const QString canonicalRoot = QDir(root).canonicalPath();
+        if (!canonicalRoot.isEmpty() && !seen.contains(canonicalRoot)) {
+            seen.insert(canonicalRoot);
+            m_producerPersistenceRoots.append(canonicalRoot);
+        }
+    }
 }
 
-QString VerifiedAssetImageProvider::assetDirectoryForApp(const QString& appName)
+bool VerifiedAssetImageProvider::validateProducerDeclarations(
+    const QVariantList& declaredProducers,
+    const QVariantList& directDependencies,
+    QStringList* producers,
+    QString* error)
+{
+    if (producers)
+        producers->clear();
+    if (error)
+        error->clear();
+
+    QSet<QString> directDependenciesSet;
+    for (const QVariant& dependency : directDependencies) {
+        if (dependency.metaType().id() == QMetaType::QString
+            && isSafeAppName(dependency.toString())) {
+            directDependenciesSet.insert(dependency.toString());
+        }
+    }
+
+    QSet<QString> seen;
+    for (const QVariant& declared : declaredProducers) {
+        if (declared.metaType().id() != QMetaType::QString) {
+            if (error)
+                *error = QStringLiteral("verified_asset_producers entries must be strings");
+            return false;
+        }
+        const QString producer = declared.toString();
+        if (!isSafeAppName(producer) || !directDependenciesSet.contains(producer)) {
+            if (error) {
+                *error = QStringLiteral("verified asset producer must be a direct core dependency: ")
+                    + producer;
+            }
+            return false;
+        }
+        if (seen.contains(producer)) {
+            if (error)
+                *error = QStringLiteral("duplicate verified asset producer: ") + producer;
+            return false;
+        }
+        seen.insert(producer);
+        if (producers)
+            producers->append(producer);
+    }
+    return true;
+}
+
+QStringList VerifiedAssetImageProvider::producerPersistenceRoots(
+    const QString& appName,
+    const QStringList& producers,
+    const QString& moduleDataRoot)
 {
     if (!isSafeAppName(appName))
         return {};
 
-    return QDir::cleanPath(
-        LogosBasecampPaths::moduleDataDirectory()
-        + QStringLiteral("/ui_assets/") + appName);
+    const QString requestedBase = moduleDataRoot.isEmpty()
+        ? LogosBasecampPaths::moduleDataDirectory()
+        : moduleDataRoot;
+    const QString canonicalBase = QDir(requestedBase).canonicalPath();
+    if (canonicalBase.isEmpty())
+        return {};
+
+    QStringList roots;
+    QSet<QString> seen;
+    for (const QString& producer : producers) {
+        if (!isSafeAppName(producer))
+            return {};
+        const QFileInfo producerInfo(canonicalBase + QLatin1Char('/') + producer);
+        const QString canonicalProducer = producerInfo.canonicalFilePath();
+        if (!producerInfo.isDir() || !isUnder(canonicalProducer, canonicalBase))
+            continue;
+
+        const QDir producerDirectory(canonicalProducer);
+        const QFileInfoList instances = producerDirectory.entryInfoList(
+            QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name);
+        for (const QFileInfo& instance : instances) {
+            const QString canonicalInstance = instance.canonicalFilePath();
+            if (instance.isDir() && isUnder(canonicalInstance, canonicalProducer)
+                && !seen.contains(canonicalInstance)) {
+                seen.insert(canonicalInstance);
+                roots.append(canonicalInstance);
+            }
+        }
+    }
+    return roots;
 }
 
 QImage VerifiedAssetImageProvider::requestImage(const QString& id, QSize* size,
@@ -72,53 +160,62 @@ QImage VerifiedAssetImageProvider::requestImage(const QString& id, QSize* size,
 
     if (size)
         *size = {};
-    if (!isDigest(id) || m_assetRoot.isEmpty())
+    if (!isSafeAppName(m_appName) || !isDigest(id) || m_producerPersistenceRoots.isEmpty())
         return {};
 
-    const QString assetPath = m_assetRoot + QLatin1Char('/') + id
-        + QStringLiteral(".png");
-    const QFileInfo info(assetPath);
-    if (!info.isFile() || info.size() <= 0 || info.size() > kMaxEncodedBytes)
-        return {};
+    for (const QString& producerRoot : m_producerPersistenceRoots) {
+        const QString assetRoot = producerRoot + QStringLiteral("/verified_assets/") + m_appName;
+        const QFileInfo rootInfo(assetRoot);
+        const QString canonicalAssetRoot = rootInfo.canonicalFilePath();
+        if (!rootInfo.isDir() || !isUnder(canonicalAssetRoot, producerRoot))
+            continue;
 
-    const QString canonicalAssetPath = info.canonicalFilePath();
-    if (!isUnder(canonicalAssetPath, m_assetRoot)) {
-        qCWarning(lcBasecampVerifiedAssets).noquote()
-            << "Blocked verified asset outside app cache root:" << assetPath;
-        return {};
+        const QString assetPath = canonicalAssetRoot + QLatin1Char('/') + id
+            + QStringLiteral(".png");
+        const QFileInfo info(assetPath);
+        if (!info.isFile() || info.size() <= 0 || info.size() > kMaxEncodedBytes)
+            continue;
+
+        const QString canonicalAssetPath = info.canonicalFilePath();
+        if (!isUnder(canonicalAssetPath, canonicalAssetRoot)) {
+            qCWarning(lcBasecampVerifiedAssets).noquote()
+                << "Blocked verified asset outside producer root:" << assetPath;
+            continue;
+        }
+
+        QFile file(canonicalAssetPath);
+        if (!file.open(QIODevice::ReadOnly))
+            continue;
+        const QByteArray bytes = file.readAll();
+        if (bytes.size() != info.size()
+            || QCryptographicHash::hash(bytes, QCryptographicHash::Sha256).toHex()
+                != id.toLatin1()) {
+            qCWarning(lcBasecampVerifiedAssets).noquote()
+                << "Blocked verified asset with mismatched digest:" << assetPath;
+            continue;
+        }
+
+        QImageReader reader(canonicalAssetPath);
+        if (!reader.canRead() || reader.format().toLower() != QByteArrayLiteral("png")) {
+            qCWarning(lcBasecampVerifiedAssets).noquote()
+                << "Blocked verified asset with unsupported image format:" << assetPath;
+            continue;
+        }
+        reader.setAutoTransform(false);
+        const QSize declaredSize = reader.size();
+        if (!hasSafeDecodedSize(declaredSize)) {
+            qCWarning(lcBasecampVerifiedAssets).noquote()
+                << "Blocked verified asset exceeding decoded pixel budget:" << assetPath;
+            continue;
+        }
+
+        const QImage image = reader.read();
+        if (image.isNull() || !hasSafeDecodedSize(image.size()))
+            continue;
+
+        if (size)
+            *size = image.size();
+        return image;
     }
-
-    QFile file(canonicalAssetPath);
-    if (!file.open(QIODevice::ReadOnly))
-        return {};
-    const QByteArray bytes = file.readAll();
-    if (bytes.size() != info.size()
-        || QCryptographicHash::hash(bytes, QCryptographicHash::Sha256).toHex()
-            != id.toLatin1()) {
-        qCWarning(lcBasecampVerifiedAssets).noquote()
-            << "Blocked verified asset with mismatched digest:" << assetPath;
-        return {};
-    }
-
-    QImageReader reader(canonicalAssetPath);
-    if (!reader.canRead() || reader.format().toLower() != QByteArrayLiteral("png")) {
-        qCWarning(lcBasecampVerifiedAssets).noquote()
-            << "Blocked verified asset with unsupported image format:" << assetPath;
-        return {};
-    }
-    reader.setAutoTransform(false);
-    const QSize declaredSize = reader.size();
-    if (!hasSafeDecodedSize(declaredSize)) {
-        qCWarning(lcBasecampVerifiedAssets).noquote()
-            << "Blocked verified asset exceeding decoded pixel budget:" << assetPath;
-        return {};
-    }
-
-    const QImage image = reader.read();
-    if (image.isNull() || !hasSafeDecodedSize(image.size()))
-        return {};
-
-    if (size)
-        *size = image.size();
-    return image;
+    return {};
 }
