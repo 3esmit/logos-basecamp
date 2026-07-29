@@ -309,9 +309,12 @@ void PluginLoader::loadQmlView(const PluginLoadRequest& request,
     if (QQmlEngine* engine = qmlWidget->engine()) {
         const QString appLibDir =
             QDir(QCoreApplication::applicationDirPath() + "/../lib").canonicalPath();
-        QmlSandbox::configure(engine, request.installDir, request.qmlViewPath, appLibDir);
+        const QString providerName =
+            VerifiedAssetImageProvider::createScopedProviderName();
+        QmlSandbox::configure(
+            engine, request.installDir, request.qmlViewPath, appLibDir, providerName);
         engine->addImageProvider(
-            QString::fromLatin1(VerifiedAssetImageProvider::kProviderName),
+            providerName,
             new VerifiedAssetImageProvider(
                 request.name,
                 VerifiedAssetImageProvider::producerPersistenceRoots(

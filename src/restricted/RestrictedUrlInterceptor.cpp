@@ -33,7 +33,9 @@ const QRegularExpression& nativePluginDirective()
 }
 
 RestrictedUrlInterceptor::RestrictedUrlInterceptor(const QStringList& allowedRoots,
-                                                   const QStringList& untrustedRoots)
+                                                   const QStringList& untrustedRoots,
+                                                   const QString& verifiedAssetProviderName)
+    : m_verifiedAssetProviderName(verifiedAssetProviderName)
 {
     for (const QString& root : allowedRoots) {
         const QString canonical = QDir(root).canonicalPath();
@@ -83,11 +85,10 @@ bool RestrictedUrlInterceptor::isVerifiedAssetUrl(const QUrl& url) const
 {
     static const QRegularExpression handleExpression(QStringLiteral("^/[a-f0-9]{64}$"));
     return url.scheme() == QLatin1String("image")
-        && url.host() == QLatin1String(VerifiedAssetImageProvider::kProviderName)
-        && url.userInfo().isEmpty()
-        && url.port() == -1
-        && url.query().isEmpty()
-        && url.fragment().isEmpty()
+        && url.authority(QUrl::FullyEncoded)
+            == QLatin1String(VerifiedAssetImageProvider::kPublicProviderName)
+        && !url.hasQuery()
+        && !url.hasFragment()
         && handleExpression.match(url.path(QUrl::FullyEncoded)).hasMatch();
 }
 
@@ -101,11 +102,15 @@ QUrl RestrictedUrlInterceptor::intercept(const QUrl& url, DataType type)
         return url;
     }
 
-    // The provider is registered by Basecamp for each sandboxed QML engine and
-    // validates a digest-handle against that app's private verified cache. It
-    // is the only non-file URL admitted to an untrusted ui_qml engine.
-    if (isVerifiedAssetUrl(url)) {
-        return url;
+    // Each engine registers the provider under an unguessable ID. Rewriting
+    // the public URL keeps the QML contract stable while making Qt Quick's
+    // process-global pixmap-cache key unique to this engine. Without this,
+    // another engine could reuse cached pixels without consulting its provider.
+    if (type == UrlString && !m_verifiedAssetProviderName.isEmpty()
+        && isVerifiedAssetUrl(url)) {
+        QUrl scopedUrl = url;
+        scopedUrl.setHost(m_verifiedAssetProviderName);
+        return scopedUrl;
     }
 
     if (url.isLocalFile()) {

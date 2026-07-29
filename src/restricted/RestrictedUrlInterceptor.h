@@ -27,7 +27,8 @@
 class RestrictedUrlInterceptor : public QQmlAbstractUrlInterceptor {
 public:
     explicit RestrictedUrlInterceptor(const QStringList& allowedRoots,
-                                      const QStringList& untrustedRoots = {});
+                                      const QStringList& untrustedRoots = {},
+                                      const QString& verifiedAssetProviderName = {});
     QUrl intercept(const QUrl& url, DataType type) override;
 
 private:
@@ -37,4 +38,5 @@ private:
 
     QStringList m_allowedRoots;
     QStringList m_untrustedRoots;
+    QString m_verifiedAssetProviderName;
 };

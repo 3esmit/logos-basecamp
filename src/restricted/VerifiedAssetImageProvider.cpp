@@ -10,7 +10,10 @@
 #include <QMetaType>
 #include <QRegularExpression>
 #include <QSet>
+#include <QUuid>
 #include <QVariant>
+
+#include <utility>
 
 #include "LogosBasecampPaths.h"
 
@@ -66,6 +69,12 @@ VerifiedAssetImageProvider::VerifiedAssetImageProvider(
             m_producerPersistenceRoots.append(canonicalRoot);
         }
     }
+}
+
+QString VerifiedAssetImageProvider::createScopedProviderName()
+{
+    return QString::fromLatin1(kPublicProviderName) + QLatin1Char('-')
+        + QUuid::createUuid().toString(QUuid::WithoutBraces);
 }
 
 bool VerifiedAssetImageProvider::validateProducerDeclarations(
@@ -134,17 +143,24 @@ QStringList VerifiedAssetImageProvider::producerPersistenceRoots(
     for (const QString& producer : producers) {
         if (!isSafeAppName(producer))
             return {};
-        const QFileInfo producerInfo(canonicalBase + QLatin1Char('/') + producer);
+        const QString expectedProducer =
+            QDir::cleanPath(canonicalBase + QLatin1Char('/') + producer);
+        const QFileInfo producerInfo(expectedProducer);
         const QString canonicalProducer = producerInfo.canonicalFilePath();
-        if (!producerInfo.isDir() || !isUnder(canonicalProducer, canonicalBase))
+        if (!producerInfo.isDir() || producerInfo.isSymLink()
+            || canonicalProducer != expectedProducer
+            || !isUnder(canonicalProducer, canonicalBase)) {
             continue;
+        }
 
         const QDir producerDirectory(canonicalProducer);
         const QFileInfoList instances = producerDirectory.entryInfoList(
             QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name);
         for (const QFileInfo& instance : instances) {
             const QString canonicalInstance = instance.canonicalFilePath();
-            if (instance.isDir() && isUnder(canonicalInstance, canonicalProducer)
+            if (instance.isDir() && !instance.isSymLink()
+                && canonicalInstance == QDir::cleanPath(instance.absoluteFilePath())
+                && isUnder(canonicalInstance, canonicalProducer)
                 && !seen.contains(canonicalInstance)) {
                 seen.insert(canonicalInstance);
                 roots.append(canonicalInstance);
@@ -168,8 +184,11 @@ QImage VerifiedAssetImageProvider::requestImage(const QString& id, QSize* size,
         const QString assetRoot = producerRoot + QStringLiteral("/verified_assets/") + m_appName;
         const QFileInfo rootInfo(assetRoot);
         const QString canonicalAssetRoot = rootInfo.canonicalFilePath();
-        if (!rootInfo.isDir() || !isUnder(canonicalAssetRoot, producerRoot))
+        if (!rootInfo.isDir() || rootInfo.isSymLink()
+            || canonicalAssetRoot != QDir::cleanPath(assetRoot)
+            || !isUnder(canonicalAssetRoot, producerRoot)) {
             continue;
+        }
 
         const QString assetPath = canonicalAssetRoot + QLatin1Char('/') + id
             + QStringLiteral(".png");
@@ -187,7 +206,12 @@ QImage VerifiedAssetImageProvider::requestImage(const QString& id, QSize* size,
         QFile file(canonicalAssetPath);
         if (!file.open(QIODevice::ReadOnly))
             continue;
-        const QByteArray bytes = file.readAll();
+        const QByteArray bytes = file.read(kMaxEncodedBytes + 1);
+        if (!file.atEnd() || bytes.isEmpty() || bytes.size() > kMaxEncodedBytes) {
+            qCWarning(lcBasecampVerifiedAssets).noquote()
+                << "Blocked verified asset exceeding encoded byte budget:" << assetPath;
+            continue;
+        }
         if (bytes.size() != info.size()
             || QCryptographicHash::hash(bytes, QCryptographicHash::Sha256).toHex()
                 != id.toLatin1()) {
