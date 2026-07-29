@@ -15,6 +15,7 @@
 
 #include <utility>
 
+#include "DependencyMetadata.h"
 #include "LogosBasecampPaths.h"
 
 Q_LOGGING_CATEGORY(lcBasecampVerifiedAssets, "logos.basecamp.verified_assets")
@@ -90,10 +91,9 @@ bool VerifiedAssetImageProvider::validateProducerDeclarations(
 
     QSet<QString> directDependenciesSet;
     for (const QVariant& dependency : directDependencies) {
-        if (dependency.metaType().id() == QMetaType::QString
-            && isSafeAppName(dependency.toString())) {
-            directDependenciesSet.insert(dependency.toString());
-        }
+        const QString dependencyName = DependencyMetadata::name(dependency);
+        if (isSafeAppName(dependencyName))
+            directDependenciesSet.insert(dependencyName);
     }
 
     QSet<QString> seen;
