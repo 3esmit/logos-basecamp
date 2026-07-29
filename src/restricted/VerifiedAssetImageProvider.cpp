@@ -1,5 +1,6 @@
 #include "restricted/VerifiedAssetImageProvider.h"
 
+#include <QBuffer>
 #include <QCryptographicHash>
 #include <QDir>
 #include <QFile>
@@ -195,7 +196,14 @@ QImage VerifiedAssetImageProvider::requestImage(const QString& id, QSize* size,
             continue;
         }
 
-        QImageReader reader(canonicalAssetPath);
+        // Decode the exact bytes whose digest was verified. Reopening the
+        // cache path here would let a concurrent replacement cross the
+        // verification-to-decode boundary.
+        QBuffer verifiedBytes;
+        verifiedBytes.setData(bytes);
+        if (!verifiedBytes.open(QIODevice::ReadOnly))
+            continue;
+        QImageReader reader(&verifiedBytes);
         if (!reader.canRead() || reader.format().toLower() != QByteArrayLiteral("png")) {
             qCWarning(lcBasecampVerifiedAssets).noquote()
                 << "Blocked verified asset with unsupported image format:" << assetPath;
