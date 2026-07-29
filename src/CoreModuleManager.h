@@ -1,5 +1,8 @@
 #pragma once
 
+#include <functional>
+#include <vector>
+
 #include <QObject>
 #include <QMap>
 #include <QString>
@@ -8,6 +11,7 @@
 #include "logos_api.h"
 
 class QTimer;
+class LogosObject;
 
 // CoreModuleManager — single owner of the logos_core_* C API.
 //
@@ -28,6 +32,12 @@ class CoreModuleManager : public QObject {
     Q_OBJECT
 
 public:
+    using ModuleInstanceEventCallback = std::function<void(
+        const QString& moduleName,
+        const QString& instanceId,
+        const QString& eventName,
+        const QVariantList& args)>;
+
     explicit CoreModuleManager(LogosAPI* logosAPI, QObject* parent = nullptr);
     ~CoreModuleManager() override;
 
@@ -87,6 +97,14 @@ public:
                                      const QString& instanceId,
                                      const QString& methodName,
                                      const QString& argsJson);
+    bool subscribeModuleInstanceEvent(const QString& moduleName,
+                                      const QString& instanceId,
+                                      const QString& eventName,
+                                      ModuleInstanceEventCallback callback);
+    void unsubscribeModuleInstanceEvent(const QString& moduleName,
+                                        const QString& instanceId,
+                                        const QString& eventName);
+    void clearModuleInstanceEventSubscriptions();
 
 signals:
     // Emitted by refresh() and after every stats-timer tick. MainUIBackend
@@ -98,7 +116,18 @@ private slots:
     void updateModuleStats();
 
 private:
+    void clearModuleInstanceEventSubscriptions(const QString& moduleName,
+                                               const QString& instanceId);
+
+    struct ModuleInstanceEventSubscription {
+        QString moduleName;
+        QString instanceId;
+        QString eventName;
+        LogosObject* object = nullptr;
+    };
+
     LogosAPI* m_logosAPI;   // not owned
     QTimer*   m_statsTimer; // owned (parent=this)
     QMap<QString, QVariantMap> m_moduleStats;
+    std::vector<ModuleInstanceEventSubscription> m_moduleInstanceEventSubscriptions;
 };

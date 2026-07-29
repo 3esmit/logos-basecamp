@@ -1,5 +1,7 @@
 #include "CoreModuleManager.h"
 
+#include <algorithm>
+
 #include <QDebug>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -9,6 +11,7 @@
 #include <QVariantList>
 
 #include "logos_api_client.h"
+#include "logos_object.h"
 #include "logos_types.h"
 
 // The logos_core_* C API is forward-declared here rather than in a shared
@@ -101,6 +104,7 @@ CoreModuleManager::CoreModuleManager(LogosAPI* logosAPI, QObject* parent)
 
 CoreModuleManager::~CoreModuleManager()
 {
+    clearModuleInstanceEventSubscriptions();
     // Belt-and-braces: Qt parenting already stops/deletes the timer, but
     // calling stop() here guarantees no in-flight tick fires against a
     // half-destroyed object during child destruction of other siblings.
@@ -148,9 +152,13 @@ bool CoreModuleManager::unloadModuleInstance(const QString& moduleName,
     }
     const QByteArray moduleUtf8 = moduleName.toUtf8();
     const QByteArray instanceUtf8 = instanceId.toUtf8();
-    return logos_core_unload_module_instance(moduleUtf8.constData(),
-                                             instanceUtf8.constData(),
-                                             false) == 1;
+    const bool unloaded = logos_core_unload_module_instance(moduleUtf8.constData(),
+                                                             instanceUtf8.constData(),
+                                                             false) == 1;
+    if (unloaded) {
+        clearModuleInstanceEventSubscriptions(moduleName, instanceId);
+    }
+    return unloaded;
 }
 
 bool CoreModuleManager::isModuleInstanceLoaded(const QString& moduleName,
@@ -294,6 +302,112 @@ QString CoreModuleManager::callModuleInstanceMethod(const QString& moduleName,
     wrapper["result"] = variantToJsonValue(result);
     QJsonDocument resultDoc(wrapper);
     return resultDoc.toJson(QJsonDocument::Compact);
+}
+
+bool CoreModuleManager::subscribeModuleInstanceEvent(
+    const QString& moduleName,
+    const QString& instanceId,
+    const QString& eventName,
+    ModuleInstanceEventCallback callback)
+{
+    if (!m_logosAPI || moduleName.trimmed().isEmpty() || instanceId.trimmed().isEmpty()
+        || eventName.trimmed().isEmpty() || !callback) {
+        return false;
+    }
+
+    const auto existing = std::find_if(
+        m_moduleInstanceEventSubscriptions.cbegin(),
+        m_moduleInstanceEventSubscriptions.cend(),
+        [&](const ModuleInstanceEventSubscription& subscription) {
+            return subscription.moduleName == moduleName
+                && subscription.instanceId == instanceId
+                && subscription.eventName == eventName;
+        });
+    if (existing != m_moduleInstanceEventSubscriptions.cend()) {
+        return true;
+    }
+
+    LogosAPIClient* client = m_logosAPI->getClient(moduleName, instanceId);
+    if (!client || !client->isConnected()) {
+        return false;
+    }
+    LogosObject* object = client->requestObject(moduleName);
+    if (!object) {
+        return false;
+    }
+
+    try {
+        client->onEvent(
+            object,
+            eventName,
+            [moduleName, instanceId, eventName, callback = std::move(callback)](
+                const QString& receivedEvent,
+                const QVariantList& args) {
+                if (receivedEvent == eventName) {
+                    callback(moduleName, instanceId, eventName, args);
+                }
+            });
+        m_moduleInstanceEventSubscriptions.push_back(
+            ModuleInstanceEventSubscription { moduleName, instanceId, eventName, object });
+        return true;
+    } catch (...) {
+        object->disconnectEvents();
+        object->release();
+        return false;
+    }
+}
+
+void CoreModuleManager::unsubscribeModuleInstanceEvent(const QString& moduleName,
+                                                       const QString& instanceId,
+                                                       const QString& eventName)
+{
+    auto subscription = std::find_if(
+        m_moduleInstanceEventSubscriptions.begin(),
+        m_moduleInstanceEventSubscriptions.end(),
+        [&](const ModuleInstanceEventSubscription& candidate) {
+            return candidate.moduleName == moduleName
+                && candidate.instanceId == instanceId
+                && candidate.eventName == eventName;
+        });
+    if (subscription == m_moduleInstanceEventSubscriptions.end()) {
+        return;
+    }
+
+    LogosObject* const object = subscription->object;
+    m_moduleInstanceEventSubscriptions.erase(subscription);
+    if (object) {
+        object->disconnectEvents();
+        object->release();
+    }
+}
+
+void CoreModuleManager::clearModuleInstanceEventSubscriptions(const QString& moduleName,
+                                                              const QString& instanceId)
+{
+    for (auto it = m_moduleInstanceEventSubscriptions.begin();
+         it != m_moduleInstanceEventSubscriptions.end();) {
+        if (it->moduleName != moduleName || it->instanceId != instanceId) {
+            ++it;
+            continue;
+        }
+        LogosObject* const object = it->object;
+        it = m_moduleInstanceEventSubscriptions.erase(it);
+        if (object) {
+            object->disconnectEvents();
+            object->release();
+        }
+    }
+}
+
+void CoreModuleManager::clearModuleInstanceEventSubscriptions()
+{
+    for (ModuleInstanceEventSubscription& subscription : m_moduleInstanceEventSubscriptions) {
+        if (subscription.object) {
+            subscription.object->disconnectEvents();
+            subscription.object->release();
+        }
+    }
+    m_moduleInstanceEventSubscriptions.clear();
 }
 
 void CoreModuleManager::updateModuleStats()

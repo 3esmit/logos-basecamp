@@ -110,6 +110,26 @@ void MainUIPlugin::startCoreService()
                              moduleName, instanceId, methodName, argsJson)
                        : QStringLiteral("{\"error\":\"Basecamp runtime unavailable\"}");
     };
+    operations.subscribeModuleInstanceEvent = [runtime](
+        const QString& moduleName,
+        const QString& instanceId,
+        const QString& eventName,
+        BasecampModuleInstanceEventCallback callback) {
+        return runtime && runtime->subscribeModuleInstanceEvent(
+                              moduleName, instanceId, eventName, std::move(callback));
+    };
+    operations.unsubscribeModuleInstanceEvent = [runtime](const QString& moduleName,
+                                                           const QString& instanceId,
+                                                           const QString& eventName) {
+        if (runtime) {
+            runtime->unsubscribeModuleInstanceEvent(moduleName, instanceId, eventName);
+        }
+    };
+    operations.clearModuleInstanceEventSubscriptions = [runtime] {
+        if (runtime) {
+            runtime->clearModuleInstanceEventSubscriptions();
+        }
+    };
 
     TokenManager* tokenManager = m_logosAPI->getTokenManager();
     if (!tokenManager) {
