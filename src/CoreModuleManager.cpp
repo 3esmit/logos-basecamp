@@ -20,7 +20,16 @@ extern "C" {
     char** logos_core_get_known_modules();
     char** logos_core_get_loaded_modules();
     int logos_core_load_module(const char* module_name, bool with_dependencies);
+    int logos_core_load_module_instance(const char* module_name,
+                                        const char* instance_id,
+                                        bool with_dependencies);
     int logos_core_unload_module(const char* module_name, bool with_dependents);
+    int logos_core_unload_module_instance(const char* module_name,
+                                          const char* instance_id,
+                                          bool with_dependents);
+    int logos_core_is_module_instance_loaded(const char* module_name,
+                                             const char* instance_id);
+    char* logos_core_get_module_instances_info();
     void logos_core_refresh_modules();
 }
 
@@ -113,9 +122,58 @@ bool CoreModuleManager::loadModule(const QString& name)
     return logos_core_load_module(name.toUtf8().constData(), true) == 1;
 }
 
+bool CoreModuleManager::loadModuleInstance(const QString& moduleName,
+                                           const QString& instanceId)
+{
+    if (moduleName.trimmed().isEmpty() || instanceId.trimmed().isEmpty()) {
+        return false;
+    }
+    const QByteArray moduleUtf8 = moduleName.toUtf8();
+    const QByteArray instanceUtf8 = instanceId.toUtf8();
+    return logos_core_load_module_instance(moduleUtf8.constData(),
+                                           instanceUtf8.constData(),
+                                           true) == 1;
+}
+
 bool CoreModuleManager::unloadModule(const QString& name)
 {
     return logos_core_unload_module(name.toUtf8().constData(), false) == 1;
+}
+
+bool CoreModuleManager::unloadModuleInstance(const QString& moduleName,
+                                             const QString& instanceId)
+{
+    if (moduleName.trimmed().isEmpty() || instanceId.trimmed().isEmpty()) {
+        return false;
+    }
+    const QByteArray moduleUtf8 = moduleName.toUtf8();
+    const QByteArray instanceUtf8 = instanceId.toUtf8();
+    return logos_core_unload_module_instance(moduleUtf8.constData(),
+                                             instanceUtf8.constData(),
+                                             false) == 1;
+}
+
+bool CoreModuleManager::isModuleInstanceLoaded(const QString& moduleName,
+                                               const QString& instanceId) const
+{
+    if (moduleName.trimmed().isEmpty() || instanceId.trimmed().isEmpty()) {
+        return false;
+    }
+    const QByteArray moduleUtf8 = moduleName.toUtf8();
+    const QByteArray instanceUtf8 = instanceId.toUtf8();
+    return logos_core_is_module_instance_loaded(moduleUtf8.constData(),
+                                                 instanceUtf8.constData()) == 1;
+}
+
+QString CoreModuleManager::moduleInstancesInfo() const
+{
+    char* instancesJson = logos_core_get_module_instances_info();
+    if (!instancesJson) {
+        return QStringLiteral("[]");
+    }
+    const QString result = QString::fromUtf8(instancesJson);
+    delete[] instancesJson;
+    return result;
 }
 
 bool CoreModuleManager::unloadModuleWithDependents(const QString& name)
@@ -138,11 +196,17 @@ void CoreModuleManager::refresh()
 
 QString CoreModuleManager::getMethods(const QString& moduleName)
 {
+    return getModuleInstanceMethods(moduleName, QString());
+}
+
+QString CoreModuleManager::getModuleInstanceMethods(const QString& moduleName,
+                                                     const QString& instanceId)
+{
     if (!m_logosAPI) {
         return "[]";
     }
 
-    LogosAPIClient* client = m_logosAPI->getClient(moduleName);
+    LogosAPIClient* client = m_logosAPI->getClient(moduleName, instanceId);
     if (!client || !client->isConnected()) {
         return "[]";
     }
@@ -159,11 +223,17 @@ QString CoreModuleManager::getMethods(const QString& moduleName)
 
 QString CoreModuleManager::getEvents(const QString& moduleName)
 {
+    return getModuleInstanceEvents(moduleName, QString());
+}
+
+QString CoreModuleManager::getModuleInstanceEvents(const QString& moduleName,
+                                                    const QString& instanceId)
+{
     if (!m_logosAPI) {
         return "[]";
     }
 
-    LogosAPIClient* client = m_logosAPI->getClient(moduleName);
+    LogosAPIClient* client = m_logosAPI->getClient(moduleName, instanceId);
     if (!client || !client->isConnected()) {
         return "[]";
     }
@@ -182,11 +252,19 @@ QString CoreModuleManager::callMethod(const QString& moduleName,
                                       const QString& methodName,
                                       const QString& argsJson)
 {
+    return callModuleInstanceMethod(moduleName, QString(), methodName, argsJson);
+}
+
+QString CoreModuleManager::callModuleInstanceMethod(const QString& moduleName,
+                                                    const QString& instanceId,
+                                                    const QString& methodName,
+                                                    const QString& argsJson)
+{
     if (!m_logosAPI) {
         return "{\"error\": \"LogosAPI not available\"}";
     }
 
-    LogosAPIClient* client = m_logosAPI->getClient(moduleName);
+    LogosAPIClient* client = m_logosAPI->getClient(moduleName, instanceId);
     if (!client || !client->isConnected()) {
         return "{\"error\": \"Module not connected\"}";
     }

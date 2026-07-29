@@ -1,4 +1,4 @@
-{ pkgs, src, logosPackageHeaders }:
+{ pkgs, src, logosPackageHeaders, logosProtocolPkg, logosQtSdk }:
 
 pkgs.stdenv.mkDerivation {
   pname = "logos-basecamp-unit-tests";
@@ -15,6 +15,9 @@ pkgs.stdenv.mkDerivation {
   buildInputs = [
     pkgs.qt6.qtbase
     pkgs.qt6.qtdeclarative   # Qt::Qml — InstallStage.h includes <QtQml/qqml.h>
+    pkgs.qt6.qtremoteobjects # logos-protocol CMake package requires Qt::RemoteObjects
+    logosProtocolPkg
+    logosQtSdk
   ];
 
   dontUseCmakeConfigure = true;
@@ -22,7 +25,9 @@ pkgs.stdenv.mkDerivation {
   buildPhase = ''
     runHook preBuild
     cmake -S tests -B build-unit-tests -GNinja -DCMAKE_BUILD_TYPE=Debug \
-      -DLOGOS_PACKAGE_HEADERS="${logosPackageHeaders}/include"
+      -DLOGOS_PACKAGE_HEADERS="${logosPackageHeaders}/include" \
+      -DLOGOS_PROTOCOL_ROOT="${logosProtocolPkg}" \
+      -DLOGOS_QT_SDK_ROOT="${logosQtSdk}"
     cmake --build build-unit-tests
     runHook postBuild
   '';

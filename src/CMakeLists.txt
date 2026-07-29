@@ -116,6 +116,7 @@ set(SOURCES
     MainContainer.cpp
     MainUIBackend.cpp
     CoreModuleManager.cpp
+    BasecampCoreService.cpp
     UIPluginManager.cpp
     PackageCoordinator.cpp
     CatalogResolution.cpp

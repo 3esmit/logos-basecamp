@@ -7,6 +7,22 @@ set(CMAKE_AUTOMOC ON)
 
 find_package(Qt6 REQUIRED COMPONENTS Core Qml Test Widgets Quick QuickWidgets)
 
+if(DEFINED LOGOS_PROTOCOL_ROOT)
+    find_package(logos-protocol REQUIRED CONFIG
+        PATHS "${LOGOS_PROTOCOL_ROOT}/lib/cmake/logos-protocol"
+        NO_DEFAULT_PATH)
+else()
+    find_package(logos-protocol REQUIRED CONFIG)
+endif()
+
+if(DEFINED LOGOS_QT_SDK_ROOT)
+    find_package(logos-qt-sdk REQUIRED CONFIG
+        PATHS "${LOGOS_QT_SDK_ROOT}/lib/cmake/logos-qt-sdk"
+        NO_DEFAULT_PATH)
+else()
+    find_package(logos-qt-sdk REQUIRED CONFIG)
+endif()
+
 enable_testing()
 
 set(BASECAMP_SRC "${CMAKE_CURRENT_SOURCE_DIR}/../src")
@@ -49,6 +65,7 @@ foreach(test_src IN LISTS TEST_SOURCES)
         Qt6::Quick
         Qt6::QuickWidgets
         Qt6::Test
+        logos-qt-sdk::logos_qt_sdk
     )
     add_test(NAME ${test_name} COMMAND ${test_name})
 endforeach()
