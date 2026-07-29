@@ -90,10 +90,12 @@ bool VerifiedAssetImageProvider::validateProducerDeclarations(
 
     QSet<QString> directDependenciesSet;
     for (const QVariant& dependency : directDependencies) {
-        if (dependency.metaType().id() == QMetaType::QString
-            && isSafeAppName(dependency.toString())) {
-            directDependenciesSet.insert(dependency.toString());
-        }
+        const QString dependencyName =
+            dependency.metaType().id() == QMetaType::QString
+            ? dependency.toString()
+            : dependency.toMap().value(QStringLiteral("name")).toString();
+        if (isSafeAppName(dependencyName))
+            directDependenciesSet.insert(dependencyName);
     }
 
     QSet<QString> seen;

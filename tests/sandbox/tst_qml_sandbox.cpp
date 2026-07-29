@@ -820,6 +820,14 @@ private slots:
             {QStringLiteral("palace_core"), QStringLiteral("unrelated_core")},
             &producers, &error));
         QCOMPARE(producers, QStringList{QStringLiteral("palace_core")});
+        const QVariantMap objectDependency{
+            {QStringLiteral("name"), QStringLiteral("palace_core")},
+            {QStringLiteral("version"), QStringLiteral(">=1.0")}};
+        QVERIFY(VerifiedAssetImageProvider::validateProducerDeclarations(
+            {QStringLiteral("palace_core")},
+            {objectDependency},
+            &producers, &error));
+        QCOMPARE(producers, QStringList{QStringLiteral("palace_core")});
         QVERIFY2(!VerifiedAssetImageProvider::validateProducerDeclarations(
                      {QStringLiteral("unrelated_core")},
                      {QStringLiteral("palace_core")}, &producers, &error),
