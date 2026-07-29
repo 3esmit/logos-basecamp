@@ -1,11 +1,35 @@
 #include "BasecampCoreService.h"
 
 #include <cstddef>
-#include <QJsonArray>
-
+#include <mutex>
+#include <set>
+#include <string_view>
 #include <utility>
+#include <vector>
+
+#include <QJsonArray>
+#include <QJsonObject>
+
+#include "logos_json_convert.h"
 
 namespace {
+
+constexpr std::string_view kScopedLifecycleEvent = "nodeChanged";
+constexpr std::string_view kScopedRelayEvent = "moduleInstanceEvent";
+constexpr std::size_t kMaxScopedEventPayloadBytes = 64U * 1024U;
+
+struct ScopedEventAddress {
+    QString moduleName;
+    QString instanceId;
+    QString eventName;
+
+    bool operator<(const ScopedEventAddress& other) const noexcept
+    {
+        if (moduleName != other.moduleName) return moduleName < other.moduleName;
+        if (instanceId != other.instanceId) return instanceId < other.instanceId;
+        return eventName < other.eventName;
+    }
+};
 
 bool hasExactStringArguments(const nlohmann::json& args, std::size_t count)
 {
@@ -22,9 +46,22 @@ bool hasExactStringArguments(const nlohmann::json& args, std::size_t count)
 
 } // namespace
 
+struct BasecampCoreService::RelayState {
+    std::mutex mutex;
+    UniversalEventCallback listener;
+    std::set<ScopedEventAddress> subscriptions;
+    bool closed = false;
+};
+
 BasecampCoreService::BasecampCoreService(BasecampCoreRuntimeOperations operations)
     : operations_(std::move(operations))
+    , relayState_(std::make_shared<RelayState>())
 {
+}
+
+BasecampCoreService::~BasecampCoreService()
+{
+    clearModuleInstanceEventSubscriptions();
 }
 
 QVariant BasecampCoreService::callMethod(const QString& methodName,
@@ -35,7 +72,15 @@ QVariant BasecampCoreService::callMethod(const QString& methodName,
 
 QJsonArray BasecampCoreService::getMethods()
 {
-    return getMethodsStdBridge();
+    QJsonArray methods = getMethodsStdBridge();
+    if (hasRuntimeOperations() && hasScopedEventOperations()) {
+        methods.append(QJsonObject {
+            { QStringLiteral("name"), QString::fromUtf8(kScopedRelayEvent.data(),
+                                                           kScopedRelayEvent.size()) },
+            { QStringLiteral("type"), QStringLiteral("event") },
+        });
+    }
+    return methods;
 }
 
 QString BasecampCoreService::providerName() const
@@ -98,6 +143,13 @@ bool BasecampCoreService::hasRuntimeOperations() const
         && static_cast<bool>(operations_.callModuleInstanceMethod);
 }
 
+bool BasecampCoreService::hasScopedEventOperations() const
+{
+    return static_cast<bool>(operations_.subscribeModuleInstanceEvent)
+        && static_cast<bool>(operations_.unsubscribeModuleInstanceEvent)
+        && static_cast<bool>(operations_.clearModuleInstanceEventSubscriptions);
+}
+
 nlohmann::json BasecampCoreService::callMethodStd(const std::string& methodName,
                                                    const nlohmann::json& args)
 {
@@ -109,8 +161,8 @@ nlohmann::json BasecampCoreService::callMethodStd(const std::string& methodName,
             {"schema", "logos.basecamp_host"},
             {"version", 1},
             {"scoped_module_instances", hasRuntimeOperations()},
-            {"direct_scoped_clients", true},
-            {"direct_scoped_events", true},
+            {"direct_scoped_clients", hasRuntimeOperations()},
+            {"direct_scoped_events", hasRuntimeOperations() && hasScopedEventOperations()},
         };
     }
 
@@ -148,6 +200,7 @@ nlohmann::json BasecampCoreService::callMethodStd(const std::string& methodName,
                 return error("MODULE_INSTANCE_UNLOAD_FAILED",
                              "Basecamp could not unload the requested module instance");
             }
+            removeModuleInstanceEventSubscriptions(moduleName, instanceId);
             return nlohmann::json{{"status", "ok"}, {"module_name", args[0]},
                                   {"instance_id", args[1]}};
         }
@@ -191,6 +244,14 @@ nlohmann::json BasecampCoreService::callMethodStd(const std::string& methodName,
         return parseObjectResponse(response, "callModuleInstanceMethod");
     }
 
+    if (methodName == "subscribeModuleInstanceEvent") {
+        return subscribeModuleInstanceEvent(args);
+    }
+
+    if (methodName == "unsubscribeModuleInstanceEvent") {
+        return unsubscribeModuleInstanceEvent(args);
+    }
+
     return error("METHOD_NOT_FOUND", "Unknown Basecamp runtime service method");
 }
 
@@ -225,12 +286,214 @@ std::vector<LogosMethodMetadata> BasecampCoreService::getMethodsStd()
             parameter("method", "string"),
             parameter("args", "LogosList"),
         }), "LogosMap"),
+        method("subscribeModuleInstanceEvent", nlohmann::json::array({
+            parameter("module_name", "string"),
+            parameter("instance_id", "string"),
+            parameter("event_name", "string"),
+        }), "LogosMap"),
+        method("unsubscribeModuleInstanceEvent", nlohmann::json::array({
+            parameter("module_name", "string"),
+            parameter("instance_id", "string"),
+            parameter("event_name", "string"),
+        }), "LogosMap"),
     };
 }
 
 void BasecampCoreService::setEventListenerStd(UniversalEventCallback callback)
 {
-    // Scoped runtime lifecycle events are consumed from the addressed module
-    // directly. This control service emits no independent events.
-    static_cast<void>(callback);
+    const std::shared_ptr<RelayState> state = relayState_;
+    if (!state) return;
+    std::lock_guard<std::mutex> lock(state->mutex);
+    if (!state->closed) {
+        state->listener = std::move(callback);
+    }
+}
+
+void BasecampCoreService::setEventListener(EventCallback callback)
+{
+    setEventListenerStdBridge(std::move(callback));
+}
+
+nlohmann::json BasecampCoreService::subscribeModuleInstanceEvent(const nlohmann::json& args)
+{
+    if (!hasRuntimeOperations() || !hasScopedEventOperations()) {
+        return error("HOST_UNAVAILABLE", "Basecamp scoped event relay is unavailable");
+    }
+    if (!hasExactStringArguments(args, 3)
+        || !validAddressSegment(args[0].get<std::string>())
+        || !validAddressSegment(args[1].get<std::string>())
+        || !validAddressSegment(args[2].get<std::string>())) {
+        return error("INVALID_ARGS",
+                     "subscribeModuleInstanceEvent expects module_name, instance_id, and event_name");
+    }
+
+    const QString moduleName = QString::fromStdString(args[0].get<std::string>());
+    const QString instanceId = QString::fromStdString(args[1].get<std::string>());
+    const QString eventName = QString::fromStdString(args[2].get<std::string>());
+    if (eventName != QString::fromUtf8(kScopedLifecycleEvent.data(),
+                                       kScopedLifecycleEvent.size())) {
+        return error("EVENT_NOT_SUPPORTED", "only nodeChanged is relayable through core_service");
+    }
+    const ScopedEventAddress address { moduleName, instanceId, eventName };
+    const std::shared_ptr<RelayState> state = relayState_;
+    if (!state) {
+        return error("HOST_UNAVAILABLE", "Basecamp scoped event relay is unavailable");
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(state->mutex);
+        if (state->closed || !state->listener) {
+            return error("EVENT_INGRESS_UNAVAILABLE",
+                         "subscribe to core_service.moduleInstanceEvent before requesting a scoped event");
+        }
+        if (state->subscriptions.find(address) != state->subscriptions.end()) {
+            return nlohmann::json{{"status", "ok"}, {"module_name", args[0]},
+                                  {"instance_id", args[1]}, {"event_name", args[2]},
+                                  {"already_subscribed", true}};
+        }
+        state->subscriptions.insert(address);
+    }
+
+    const std::weak_ptr<RelayState> weakState(state);
+    const bool subscribed = operations_.subscribeModuleInstanceEvent(
+        moduleName,
+        instanceId,
+        eventName,
+        [weakState, address](const QString& receivedModule,
+                             const QString& receivedInstance,
+                             const QString& receivedEvent,
+                             const QVariantList& receivedArgs) {
+            if (receivedModule != address.moduleName || receivedInstance != address.instanceId
+                || receivedEvent != address.eventName) {
+                return;
+            }
+            const std::shared_ptr<RelayState> relay = weakState.lock();
+            if (!relay) return;
+
+            UniversalEventCallback listener;
+            {
+                std::lock_guard<std::mutex> lock(relay->mutex);
+                if (relay->closed || relay->subscriptions.find(address) == relay->subscriptions.end()
+                    || !relay->listener) {
+                    return;
+                }
+                listener = relay->listener;
+            }
+
+            try {
+                nlohmann::json eventArgs = nlohmann::json::array();
+                for (const QVariant& value : receivedArgs) {
+                    eventArgs.push_back(logos::qvariantToNlohmann(value));
+                }
+                const nlohmann::json envelope {
+                    {"schema", "logos.basecamp_host.module_event"},
+                    {"version", 1},
+                    {"module_name", address.moduleName.toStdString()},
+                    {"instance_id", address.instanceId.toStdString()},
+                    {"event_name", address.eventName.toStdString()},
+                    {"args", std::move(eventArgs)},
+                };
+                const std::string payload = nlohmann::json::array({envelope}).dump();
+                if (payload.size() > kMaxScopedEventPayloadBytes) return;
+                listener(std::string(kScopedRelayEvent), payload);
+            } catch (...) {
+                // Event ingress is best effort. Do not unwind through a module callback.
+            }
+        });
+    if (!subscribed) {
+        std::lock_guard<std::mutex> lock(state->mutex);
+        state->subscriptions.erase(address);
+        return error("MODULE_INSTANCE_EVENT_SUBSCRIBE_FAILED",
+                     "Basecamp could not subscribe to the requested module instance event");
+    }
+
+    return nlohmann::json{{"status", "ok"}, {"module_name", args[0]},
+                          {"instance_id", args[1]}, {"event_name", args[2]},
+                          {"already_subscribed", false}};
+}
+
+nlohmann::json BasecampCoreService::unsubscribeModuleInstanceEvent(const nlohmann::json& args)
+{
+    if (!hasRuntimeOperations() || !hasScopedEventOperations()) {
+        return error("HOST_UNAVAILABLE", "Basecamp scoped event relay is unavailable");
+    }
+    if (!hasExactStringArguments(args, 3)
+        || !validAddressSegment(args[0].get<std::string>())
+        || !validAddressSegment(args[1].get<std::string>())
+        || !validAddressSegment(args[2].get<std::string>())) {
+        return error("INVALID_ARGS",
+                     "unsubscribeModuleInstanceEvent expects module_name, instance_id, and event_name");
+    }
+
+    const QString moduleName = QString::fromStdString(args[0].get<std::string>());
+    const QString instanceId = QString::fromStdString(args[1].get<std::string>());
+    const QString eventName = QString::fromStdString(args[2].get<std::string>());
+    if (eventName != QString::fromUtf8(kScopedLifecycleEvent.data(),
+                                       kScopedLifecycleEvent.size())) {
+        return error("EVENT_NOT_SUPPORTED", "only nodeChanged is relayable through core_service");
+    }
+    const ScopedEventAddress address { moduleName, instanceId, eventName };
+    const std::shared_ptr<RelayState> state = relayState_;
+    if (!state) {
+        return error("HOST_UNAVAILABLE", "Basecamp scoped event relay is unavailable");
+    }
+
+    bool removed = false;
+    {
+        std::lock_guard<std::mutex> lock(state->mutex);
+        removed = state->subscriptions.erase(address) != 0;
+    }
+    if (removed) {
+        operations_.unsubscribeModuleInstanceEvent(moduleName, instanceId, eventName);
+    }
+    return nlohmann::json{{"status", "ok"}, {"module_name", args[0]},
+                          {"instance_id", args[1]}, {"event_name", args[2]},
+                          {"removed", removed}};
+}
+
+void BasecampCoreService::removeModuleInstanceEventSubscriptions(const QString& moduleName,
+                                                                 const QString& instanceId) noexcept
+{
+    const std::shared_ptr<RelayState> state = relayState_;
+    if (!state || !hasScopedEventOperations()) return;
+
+    std::vector<ScopedEventAddress> removed;
+    try {
+        {
+            std::lock_guard<std::mutex> lock(state->mutex);
+            for (auto it = state->subscriptions.begin(); it != state->subscriptions.end();) {
+                if (it->moduleName != moduleName || it->instanceId != instanceId) {
+                    ++it;
+                    continue;
+                }
+                removed.push_back(*it);
+                it = state->subscriptions.erase(it);
+            }
+        }
+        for (const ScopedEventAddress& address : removed) {
+            operations_.unsubscribeModuleInstanceEvent(
+                address.moduleName, address.instanceId, address.eventName);
+        }
+    } catch (...) {
+        // Unload must not throw through the provider ABI.
+    }
+}
+
+void BasecampCoreService::clearModuleInstanceEventSubscriptions() noexcept
+{
+    const std::shared_ptr<RelayState> state = relayState_;
+    if (!state) return;
+    try {
+        {
+            std::lock_guard<std::mutex> lock(state->mutex);
+            state->closed = true;
+            state->listener = {};
+            state->subscriptions.clear();
+        }
+        if (hasScopedEventOperations()) {
+            operations_.clearModuleInstanceEventSubscriptions();
+        }
+    } catch (...) {
+        // Destruction must not throw through Basecamp's plugin teardown path.
+    }
 }
