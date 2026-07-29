@@ -8,7 +8,9 @@
     logos-cpp-sdk.url = "github:logos-co/logos-cpp-sdk";
     logos-cpp-sdk.inputs.logos-protocol.follows = "logos-protocol";
     logos-protocol = {
-      url = "github:3esmit/logos-protocol";
+      # Inspector uses scoped C clients for independently managed module
+      # instances, so Basecamp must expose the same published protocol ABI.
+      url = "github:3esmit/logos-protocol/e71e759261a1ddbf5bfb490aac3623b94d4e39bb";
       inputs.logos-nix.follows = "logos-nix";
     };
     logos-qt-sdk = {
