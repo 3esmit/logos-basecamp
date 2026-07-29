@@ -69,6 +69,7 @@ foreach(slot
     sandboxAllowsQrcScheme
     sandboxAllowsOnlyStrictVerifiedAssetHandle
     verifiedAssetProviderIsolatesQmlEngineCaches
+    verifiedAssetProviderRevalidatesRevokedHandles
     verifiedAssetProviderRejectsUntrustedCacheInputs
     verifiedAssetProviderRejectsInRootAliases
     verifiedAssetProviderUsesOnlyDeclaredProducerRoots

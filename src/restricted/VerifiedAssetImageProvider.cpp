@@ -156,15 +156,21 @@ QStringList VerifiedAssetImageProvider::producerPersistenceRoots(
         const QDir producerDirectory(canonicalProducer);
         const QFileInfoList instances = producerDirectory.entryInfoList(
             QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name);
-        for (const QFileInfo& instance : instances) {
-            const QString canonicalInstance = instance.canonicalFilePath();
-            if (instance.isDir() && !instance.isSymLink()
-                && canonicalInstance == QDir::cleanPath(instance.absoluteFilePath())
-                && isUnder(canonicalInstance, canonicalProducer)
-                && !seen.contains(canonicalInstance)) {
-                seen.insert(canonicalInstance);
-                roots.append(canonicalInstance);
-            }
+        if (instances.isEmpty())
+            continue;
+
+        // liblogos resolves a module's ReuseOrCreate persistence instance by
+        // selecting the first name-sorted directory. Mirror that choice: later
+        // entries are stale or non-active instances and must not become extra
+        // asset capabilities.
+        const QFileInfo& instance = instances.constFirst();
+        const QString canonicalInstance = instance.canonicalFilePath();
+        if (instance.isDir() && !instance.isSymLink()
+            && canonicalInstance == QDir::cleanPath(instance.absoluteFilePath())
+            && isUnder(canonicalInstance, canonicalProducer)
+            && !seen.contains(canonicalInstance)) {
+            seen.insert(canonicalInstance);
+            roots.append(canonicalInstance);
         }
     }
     return roots;
@@ -177,8 +183,12 @@ QImage VerifiedAssetImageProvider::requestImage(const QString& id, QSize* size,
 
     if (size)
         *size = {};
-    if (!isSafeAppName(m_appName) || !isDigest(id) || m_producerPersistenceRoots.isEmpty())
+    const qsizetype queryStart = id.indexOf(QLatin1Char('?'));
+    const QString digest = queryStart < 0 ? id : id.left(queryStart);
+    if (!isSafeAppName(m_appName) || !isDigest(digest)
+        || m_producerPersistenceRoots.isEmpty()) {
         return {};
+    }
 
     for (const QString& producerRoot : m_producerPersistenceRoots) {
         const QString assetRoot = producerRoot + QStringLiteral("/verified_assets/") + m_appName;
@@ -190,7 +200,7 @@ QImage VerifiedAssetImageProvider::requestImage(const QString& id, QSize* size,
             continue;
         }
 
-        const QString assetPath = canonicalAssetRoot + QLatin1Char('/') + id
+        const QString assetPath = canonicalAssetRoot + QLatin1Char('/') + digest
             + QStringLiteral(".png");
         const QFileInfo info(assetPath);
         if (!info.isFile() || info.size() <= 0 || info.size() > kMaxEncodedBytes)
@@ -214,7 +224,7 @@ QImage VerifiedAssetImageProvider::requestImage(const QString& id, QSize* size,
         }
         if (bytes.size() != info.size()
             || QCryptographicHash::hash(bytes, QCryptographicHash::Sha256).toHex()
-                != id.toLatin1()) {
+                != digest.toLatin1()) {
             qCWarning(lcBasecampVerifiedAssets).noquote()
                 << "Blocked verified asset with mismatched digest:" << assetPath;
             continue;

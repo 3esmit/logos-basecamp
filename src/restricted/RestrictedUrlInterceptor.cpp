@@ -5,6 +5,7 @@
 #include <QLoggingCategory>
 #include <QRegularExpression>
 #include <QTextStream>
+#include <QUuid>
 
 #include "restricted/VerifiedAssetImageProvider.h"
 
@@ -104,12 +105,16 @@ QUrl RestrictedUrlInterceptor::intercept(const QUrl& url, DataType type)
 
     // Each engine registers the provider under an unguessable ID. Rewriting
     // the public URL keeps the QML contract stable while making Qt Quick's
-    // process-global pixmap-cache key unique to this engine. Without this,
-    // another engine could reuse cached pixels without consulting its provider.
+    // process-global pixmap-cache key unique to this engine. The internal query
+    // also makes each resolution unique: Qt otherwise serves a revoked handle
+    // from its image cache without consulting the provider again.
     if (type == UrlString && !m_verifiedAssetProviderName.isEmpty()
         && isVerifiedAssetUrl(url)) {
         QUrl scopedUrl = url;
         scopedUrl.setHost(m_verifiedAssetProviderName);
+        scopedUrl.setQuery(
+            QStringLiteral("request=")
+            + QUuid::createUuid().toString(QUuid::WithoutBraces));
         return scopedUrl;
     }
 

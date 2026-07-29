@@ -23,9 +23,10 @@ namespace QmlSandbox {
 // `appLibDir` is the vetted application library dir (in production
 // <appDir>/../lib); tests pass an explicit value (often empty).
 // `verifiedAssetProviderName` is the per-engine internal provider ID used to
-// rewrite the stable public verified-asset URL. An empty value grants no image
-// provider URL capability. Returns the set of import roots that were treated
-// as untrusted — useful for assertions.
+// rewrite the stable public verified-asset URL. The interceptor also gives each
+// resolution a unique internal cache key so revoked handles are revalidated.
+// An empty value grants no image provider URL capability. Returns the set of
+// import roots that were treated as untrusted — useful for assertions.
 QStringList configure(QQmlEngine* engine,
                       const QString& installDir,
                       const QString& qmlViewPath,

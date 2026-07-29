@@ -8,8 +8,9 @@
 // A QML image provider for runtime assets prepared by an application's trusted
 // backend. The QML sandbox permits only image://basecamp-verified/<sha256>.
 // Before Qt Quick sees that URL, the sandbox rewrites its provider ID to a
-// per-engine value so Qt's process-global pixmap cache cannot share pixels
-// between applications.
+// per-engine value and adds a per-resolution internal cache key so Qt's
+// process-global pixmap cache cannot share pixels between applications or
+// bypass revocation checks.
 // The provider receives only persistence roots of core modules declared by the
 // UI application's `verified_asset_producers` metadata field, so one app
 // cannot resolve arbitrary module-data or another app's assets.

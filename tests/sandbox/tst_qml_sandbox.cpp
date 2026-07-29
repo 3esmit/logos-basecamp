@@ -524,10 +524,18 @@ private slots:
             /*appLibDir=*/QString(), scopedProviderName);
         const QString digest(64, QLatin1Char('a'));
         const QUrl valid(QStringLiteral("image://basecamp-verified/") + digest);
-        QUrl scopedValid = valid;
-        scopedValid.setHost(scopedProviderName);
-        QCOMPARE(engine.interceptUrl(valid, QQmlAbstractUrlInterceptor::UrlString),
-                 scopedValid);
+        const QUrl scopedValid =
+            engine.interceptUrl(valid, QQmlAbstractUrlInterceptor::UrlString);
+        QCOMPARE(scopedValid.scheme(), QStringLiteral("image"));
+        QCOMPARE(scopedValid.host(), scopedProviderName);
+        QCOMPARE(scopedValid.path(), QLatin1Char('/') + digest);
+        QVERIFY(scopedValid.hasQuery());
+        QVERIFY(scopedValid.query().startsWith(QStringLiteral("request=")));
+        const QUrl secondScopedValid =
+            engine.interceptUrl(valid, QQmlAbstractUrlInterceptor::UrlString);
+        QVERIFY(secondScopedValid != scopedValid);
+        QCOMPARE(secondScopedValid.host(), scopedProviderName);
+        QCOMPARE(secondScopedValid.path(), scopedValid.path());
 
         for (const auto type : {
                  QQmlAbstractUrlInterceptor::QmlFile,
@@ -632,6 +640,66 @@ private slots:
         QVERIFY(!imageB.isNull());
         QTRY_VERIFY_WITH_TIMEOUT(imageB->property("failed").toBool(), 5000);
         QCOMPARE(imageB->property("source").toUrl(), publicUrl);
+    }
+
+    // Removing a staged asset revokes its handle for future resolutions. QML
+    // enables image caching by default, so a second Image using the same public
+    // URL must still consult the provider instead of inheriting the first
+    // Image's cached pixels.
+    void verifiedAssetProviderRevalidatesRevokedHandles()
+    {
+        QTemporaryDir dir(
+            workRoot() + QStringLiteral("/tst_verified_revocation-XXXXXX"));
+        QVERIFY(dir.isValid());
+
+        const QString appName = QStringLiteral("revocation_ui");
+        const QString producerRoot = dir.path() + QStringLiteral("/producer");
+        const QString assetDir =
+            producerRoot + QStringLiteral("/verified_assets/") + appName;
+        QVERIFY(QDir().mkpath(assetDir));
+
+        const QByteArray png = encodedImage(
+            QSize(2, 1), QImage::Format_RGBA8888, QColor(Qt::red), "PNG");
+        QVERIFY2(!png.isEmpty(), "failed to create valid PNG fixture");
+        const QString digest = QString::fromLatin1(
+            QCryptographicHash::hash(png, QCryptographicHash::Sha256).toHex());
+        const QString assetPath =
+            assetDir + QLatin1Char('/') + digest + QStringLiteral(".png");
+        writeBytes(assetPath, png);
+
+        const QString providerName =
+            VerifiedAssetImageProvider::createScopedProviderName();
+        QQmlEngine engine;
+        QmlSandbox::configure(
+            &engine, dir.path(), dir.path() + QStringLiteral("/view.qml"),
+            /*appLibDir=*/QString(), providerName);
+        engine.addImageProvider(
+            providerName,
+            new VerifiedAssetImageProvider(appName, {producerRoot}));
+
+        const QByteArray qml = QStringLiteral(
+            "import QtQuick\n"
+            "Image {\n"
+            "  cache: true\n"
+            "  asynchronous: false\n"
+            "  source: \"image://basecamp-verified/%1\"\n"
+            "  property bool ready: status === Image.Ready\n"
+            "  property bool failed: status === Image.Error\n"
+            "}\n").arg(digest).toUtf8();
+        QQmlComponent component(&engine);
+        component.setData(
+            qml, QUrl::fromLocalFile(dir.path() + QStringLiteral("/view.qml")));
+
+        QScopedPointer<QObject> first(component.create());
+        QVERIFY2(!component.isError(), qPrintable(component.errorString()));
+        QVERIFY(!first.isNull());
+        QTRY_VERIFY_WITH_TIMEOUT(first->property("ready").toBool(), 5000);
+
+        QVERIFY(QFile::remove(assetPath));
+
+        QScopedPointer<QObject> second(component.create());
+        QVERIFY(!second.isNull());
+        QTRY_VERIFY_WITH_TIMEOUT(second->property("failed").toBool(), 5000);
     }
 
     // The provider reads only a canonical PNG inside its app-specific root,
@@ -742,6 +810,7 @@ private slots:
         QTemporaryDir moduleDataDir(workRoot() + QStringLiteral("/tst_verified_producers-XXXXXX"));
         QVERIFY(moduleDataDir.isValid());
         QVERIFY(QDir().mkpath(moduleDataDir.path() + QStringLiteral("/palace_core/instance-a")));
+        QVERIFY(QDir().mkpath(moduleDataDir.path() + QStringLiteral("/palace_core/instance-b")));
         QVERIFY(QDir().mkpath(moduleDataDir.path() + QStringLiteral("/unrelated_core/instance-b")));
 
         QStringList producers;
@@ -764,6 +833,7 @@ private slots:
             QStringLiteral("logos_palace_ui"), {QStringLiteral("palace_core")}, moduleDataDir.path());
         QCOMPARE(roots.size(), 1);
         QVERIFY(roots.at(0).endsWith(QStringLiteral("/palace_core/instance-a")));
+        QVERIFY(!roots.at(0).endsWith(QStringLiteral("/palace_core/instance-b")));
         QVERIFY(!roots.at(0).contains(QStringLiteral("unrelated_core")));
 
         QVERIFY(QDir().mkpath(
@@ -780,6 +850,21 @@ private slots:
                      {QStringLiteral("declared_core")},
                      moduleDataDir.path()).isEmpty(),
                  "declared producer alias exposed another module's persistence root");
+
+        const QString mixedProducer =
+            moduleDataDir.path() + QStringLiteral("/mixed_core");
+        QVERIFY(QDir().mkpath(mixedProducer + QStringLiteral("/instance-b")));
+        QVERIFY2(QFile::link(
+                     moduleDataDir.path() + QStringLiteral("/actual_core/instance-c"),
+                     mixedProducer + QStringLiteral("/instance-a")),
+                 "failed to create first-instance alias fixture");
+        QVERIFY(QFileInfo(
+            mixedProducer + QStringLiteral("/instance-a")).isSymLink());
+        QVERIFY2(VerifiedAssetImageProvider::producerPersistenceRoots(
+                     QStringLiteral("consumer_ui"),
+                     {QStringLiteral("mixed_core")},
+                     moduleDataDir.path()).isEmpty(),
+                 "invalid active instance fell through to a later instance");
     }
 
     void verifiedAssetProducerMetadataRecoversInstalledVariantDeclaration()
