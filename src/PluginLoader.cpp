@@ -27,6 +27,7 @@
 #include "logos_api_client.h"
 #include "token_manager.h"
 #include "restricted/QmlSandbox.h"
+#include "restricted/VerifiedAssetImageProvider.h"
 #include <ViewModuleHost.h>
 
 PluginLoader::PluginLoader(LogosAPI* logosAPI,
@@ -308,7 +309,16 @@ void PluginLoader::loadQmlView(const PluginLoadRequest& request,
     if (QQmlEngine* engine = qmlWidget->engine()) {
         const QString appLibDir =
             QDir(QCoreApplication::applicationDirPath() + "/../lib").canonicalPath();
-        QmlSandbox::configure(engine, request.installDir, request.qmlViewPath, appLibDir);
+        const QString providerName =
+            VerifiedAssetImageProvider::createScopedProviderName();
+        QmlSandbox::configure(
+            engine, request.installDir, request.qmlViewPath, appLibDir, providerName);
+        engine->addImageProvider(
+            providerName,
+            new VerifiedAssetImageProvider(
+                request.name,
+                VerifiedAssetImageProvider::producerPersistenceRoots(
+                    request.name, request.verifiedAssetProducers)));
         engine->setBaseUrl(QUrl::fromLocalFile(request.installDir + "/"));
     }
 

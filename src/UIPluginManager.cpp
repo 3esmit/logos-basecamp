@@ -1,5 +1,6 @@
 #include "UIPluginManager.h"
 #include "CoreModuleManager.h"
+#include "restricted/VerifiedAssetProducerMetadata.h"
 #include "PackageCoordinator.h"
 #include "PluginLoader.h"
 
@@ -209,6 +210,17 @@ void UIPluginManager::loadUiModule(const QString& moduleName)
         if (hasBackendPlugin(moduleName))
             request.mainFilePath = meta.value("mainFilePath").toString();
         request.coreDependencies = meta.value("dependencies").toList();
+        QString producerError;
+        if (!VerifiedAssetProducerMetadata::resolve(
+                meta,
+                request.coreDependencies,
+                &request.verifiedAssetProducers,
+                &producerError)) {
+            qWarning() << "Refusing ui_qml verified asset producer declaration for"
+                       << moduleName << ":" << producerError;
+            emit pluginLoadFailedNotice(moduleName, producerError);
+            return;
+        }
 
         m_pluginLoader->load(request);
         return;

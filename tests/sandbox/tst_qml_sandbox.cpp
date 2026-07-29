@@ -37,9 +37,12 @@
 #include <QtTest/QtTest>
 
 #include <QCoreApplication>
+#include <QBuffer>
+#include <QCryptographicHash>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QImage>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
@@ -52,6 +55,8 @@
 #include <QUrl>
 
 #include "restricted/QmlSandbox.h"
+#include "restricted/VerifiedAssetImageProvider.h"
+#include "restricted/VerifiedAssetProducerMetadata.h"
 
 namespace {
 
@@ -74,6 +79,27 @@ void writeFile(const QString& path, const QString& contents)
     QVERIFY2(f.open(QIODevice::WriteOnly | QIODevice::Text),
              qPrintable(QStringLiteral("cannot write ") + path));
     QTextStream(&f) << contents;
+}
+
+void writeBytes(const QString& path, const QByteArray& contents)
+{
+    QFile file(path);
+    QVERIFY2(file.open(QIODevice::WriteOnly),
+             qPrintable(QStringLiteral("cannot write ") + path));
+    QCOMPARE(file.write(contents), contents.size());
+}
+
+QByteArray encodedImage(const QSize& size, QImage::Format format,
+                        const QColor& color, const char* imageFormat)
+{
+    QImage image(size, format);
+    if (image.isNull())
+        return {};
+    image.fill(color);
+    QBuffer buffer;
+    if (!buffer.open(QIODevice::WriteOnly) || !image.save(&buffer, imageFormat))
+        return {};
+    return buffer.data();
 }
 
 // Source dir of the evil_app fixture (tests/sandbox/evil_app). Provided by CMake
@@ -480,6 +506,514 @@ private slots:
         const QUrl out =
             engine.interceptUrl(qrc, QQmlAbstractUrlInterceptor::QmlFile);
         QCOMPARE(out, qrc);
+    }
+
+    // The verified asset provider is the only extra URL capability granted to
+    // sandboxed QML. It accepts a strict digest-shaped handle and no authority,
+    // query, fragment, or alternate provider name.
+    void sandboxAllowsOnlyStrictVerifiedAssetHandle()
+    {
+        QTemporaryDir dir(workRoot() + QStringLiteral("/tst_qml_sandbox-XXXXXX"));
+        QVERIFY(dir.isValid());
+
+        QQmlEngine engine;
+        const QString scopedProviderName =
+            VerifiedAssetImageProvider::createScopedProviderName();
+        QmlSandbox::configure(
+            &engine, dir.path(), dir.path() + "/view.qml",
+            /*appLibDir=*/QString(), scopedProviderName);
+        const QString digest(64, QLatin1Char('a'));
+        const QUrl valid(QStringLiteral("image://basecamp-verified/") + digest);
+        const QUrl scopedValid =
+            engine.interceptUrl(valid, QQmlAbstractUrlInterceptor::UrlString);
+        QCOMPARE(scopedValid.scheme(), QStringLiteral("image"));
+        QCOMPARE(scopedValid.host(), scopedProviderName);
+        QCOMPARE(scopedValid.path(), QLatin1Char('/') + digest);
+        QVERIFY(scopedValid.hasQuery());
+        QVERIFY(scopedValid.query().startsWith(QStringLiteral("request=")));
+        const QUrl secondScopedValid =
+            engine.interceptUrl(valid, QQmlAbstractUrlInterceptor::UrlString);
+        QVERIFY(secondScopedValid != scopedValid);
+        QCOMPARE(secondScopedValid.host(), scopedProviderName);
+        QCOMPARE(secondScopedValid.path(), scopedValid.path());
+
+        for (const auto type : {
+                 QQmlAbstractUrlInterceptor::QmlFile,
+                 QQmlAbstractUrlInterceptor::JavaScriptFile,
+                 QQmlAbstractUrlInterceptor::QmldirFile}) {
+            QVERIFY2(engine.interceptUrl(valid, type).isEmpty(),
+                     "verified image URL was admitted as executable QML content");
+        }
+
+        const QList<QUrl> rejected = {
+            QUrl(QStringLiteral("image://other-provider/") + digest),
+            QUrl(QStringLiteral("image://basecamp-verified/not-a-digest")),
+            QUrl(QStringLiteral("image://basecamp-verified/") + digest + "?x=1"),
+            QUrl(QStringLiteral("image://basecamp-verified/") + digest + "#fragment"),
+            QUrl(QStringLiteral("image://basecamp-verified@attacker/") + digest),
+            QUrl(QStringLiteral("image://@basecamp-verified/") + digest),
+            QUrl(QStringLiteral("image://basecamp-verified/") + digest + "?"),
+            QUrl(QStringLiteral("image://basecamp-verified/") + digest + "#"),
+            QUrl(QStringLiteral("image://") + scopedProviderName + QLatin1Char('/') + digest),
+        };
+        for (const QUrl& url : rejected) {
+            QVERIFY2(engine.interceptUrl(url, QQmlAbstractUrlInterceptor::UrlString).isEmpty(),
+                     qPrintable(QStringLiteral("SANDBOX BREACH: unexpected image URL was allowed: ")
+                                + url.toString()));
+        }
+    }
+
+    // Qt Quick's pixmap cache is process-global and keyed by URL, not by
+    // QQmlEngine or image-provider instance. The sandbox must rewrite the
+    // stable public URL to a per-engine provider ID before cache lookup;
+    // otherwise a second app can receive the first app's cached pixels without
+    // its own provider being consulted.
+    void verifiedAssetProviderIsolatesQmlEngineCaches()
+    {
+        QTemporaryDir dir(workRoot() + QStringLiteral("/tst_verified_cache_scope-XXXXXX"));
+        QVERIFY(dir.isValid());
+
+        const QString appA = QStringLiteral("cache_app_a");
+        const QString appB = QStringLiteral("cache_app_b");
+        const QString rootA = dir.path() + QStringLiteral("/producer-a");
+        const QString rootB = dir.path() + QStringLiteral("/producer-b");
+        const QString assetDirA =
+            rootA + QStringLiteral("/verified_assets/") + appA;
+        QVERIFY(QDir().mkpath(assetDirA));
+        QVERIFY(QDir().mkpath(
+            rootB + QStringLiteral("/verified_assets/") + appB));
+
+        const QByteArray redPng = encodedImage(
+            QSize(2, 1), QImage::Format_RGBA8888, QColor(Qt::red), "PNG");
+        QVERIFY2(!redPng.isEmpty(), "failed to create valid PNG fixture");
+        const QString digest = QString::fromLatin1(
+            QCryptographicHash::hash(redPng, QCryptographicHash::Sha256).toHex());
+        writeBytes(assetDirA + QLatin1Char('/') + digest + QStringLiteral(".png"),
+                   redPng);
+
+        const QString providerA =
+            VerifiedAssetImageProvider::createScopedProviderName();
+        const QString providerB =
+            VerifiedAssetImageProvider::createScopedProviderName();
+        QVERIFY(providerA != providerB);
+
+        QQmlEngine engineA;
+        QmlSandbox::configure(
+            &engineA, dir.path(), dir.path() + QStringLiteral("/view-a.qml"),
+            /*appLibDir=*/QString(), providerA);
+        engineA.addImageProvider(
+            providerA, new VerifiedAssetImageProvider(appA, {rootA}));
+
+        const QByteArray qml = QStringLiteral(
+            "import QtQuick\n"
+            "Image {\n"
+            "  cache: true\n"
+            "  asynchronous: false\n"
+            "  source: \"image://basecamp-verified/%1\"\n"
+            "  property bool ready: status === Image.Ready\n"
+            "  property bool failed: status === Image.Error\n"
+            "}\n").arg(digest).toUtf8();
+
+        QQmlComponent componentA(&engineA);
+        componentA.setData(qml, QUrl::fromLocalFile(
+                                   dir.path() + QStringLiteral("/view-a.qml")));
+        QScopedPointer<QObject> imageA(componentA.create());
+        QVERIFY2(!componentA.isError(), qPrintable(componentA.errorString()));
+        QVERIFY(!imageA.isNull());
+        QTRY_VERIFY_WITH_TIMEOUT(imageA->property("ready").toBool(), 5000);
+        const QUrl publicUrl(
+            QStringLiteral("image://basecamp-verified/") + digest);
+        QCOMPARE(imageA->property("source").toUrl(), publicUrl);
+
+        QQmlEngine engineB;
+        QmlSandbox::configure(
+            &engineB, dir.path(), dir.path() + QStringLiteral("/view-b.qml"),
+            /*appLibDir=*/QString(), providerB);
+        engineB.addImageProvider(
+            providerB, new VerifiedAssetImageProvider(appB, {rootB}));
+
+        QQmlComponent componentB(&engineB);
+        componentB.setData(qml, QUrl::fromLocalFile(
+                                   dir.path() + QStringLiteral("/view-b.qml")));
+        QScopedPointer<QObject> imageB(componentB.create());
+        QVERIFY2(!componentB.isError(), qPrintable(componentB.errorString()));
+        QVERIFY(!imageB.isNull());
+        QTRY_VERIFY_WITH_TIMEOUT(imageB->property("failed").toBool(), 5000);
+        QCOMPARE(imageB->property("source").toUrl(), publicUrl);
+    }
+
+    // Removing a staged asset revokes its handle for future resolutions. QML
+    // enables image caching by default, so a second Image using the same public
+    // URL must still consult the provider instead of inheriting the first
+    // Image's cached pixels.
+    void verifiedAssetProviderRevalidatesRevokedHandles()
+    {
+        QTemporaryDir dir(
+            workRoot() + QStringLiteral("/tst_verified_revocation-XXXXXX"));
+        QVERIFY(dir.isValid());
+
+        const QString appName = QStringLiteral("revocation_ui");
+        const QString producerRoot = dir.path() + QStringLiteral("/producer");
+        const QString assetDir =
+            producerRoot + QStringLiteral("/verified_assets/") + appName;
+        QVERIFY(QDir().mkpath(assetDir));
+
+        const QByteArray png = encodedImage(
+            QSize(2, 1), QImage::Format_RGBA8888, QColor(Qt::red), "PNG");
+        QVERIFY2(!png.isEmpty(), "failed to create valid PNG fixture");
+        const QString digest = QString::fromLatin1(
+            QCryptographicHash::hash(png, QCryptographicHash::Sha256).toHex());
+        const QString assetPath =
+            assetDir + QLatin1Char('/') + digest + QStringLiteral(".png");
+        writeBytes(assetPath, png);
+
+        const QString providerName =
+            VerifiedAssetImageProvider::createScopedProviderName();
+        QQmlEngine engine;
+        QmlSandbox::configure(
+            &engine, dir.path(), dir.path() + QStringLiteral("/view.qml"),
+            /*appLibDir=*/QString(), providerName);
+        engine.addImageProvider(
+            providerName,
+            new VerifiedAssetImageProvider(appName, {producerRoot}));
+
+        const QByteArray qml = QStringLiteral(
+            "import QtQuick\n"
+            "Image {\n"
+            "  cache: true\n"
+            "  asynchronous: false\n"
+            "  source: \"image://basecamp-verified/%1\"\n"
+            "  property bool ready: status === Image.Ready\n"
+            "  property bool failed: status === Image.Error\n"
+            "}\n").arg(digest).toUtf8();
+        QQmlComponent component(&engine);
+        component.setData(
+            qml, QUrl::fromLocalFile(dir.path() + QStringLiteral("/view.qml")));
+
+        QScopedPointer<QObject> first(component.create());
+        QVERIFY2(!component.isError(), qPrintable(component.errorString()));
+        QVERIFY(!first.isNull());
+        QTRY_VERIFY_WITH_TIMEOUT(first->property("ready").toBool(), 5000);
+
+        QVERIFY(QFile::remove(assetPath));
+
+        QScopedPointer<QObject> second(component.create());
+        QVERIFY(!second.isNull());
+        QTRY_VERIFY_WITH_TIMEOUT(second->property("failed").toBool(), 5000);
+    }
+
+    // The provider reads only a canonical PNG inside its app-specific root,
+    // verifies the bytes against the QML-visible digest handle, then enforces
+    // a decoded pixel budget. Replacing a cached file cannot alter an already
+    // issued handle because the digest check fails closed.
+    void verifiedAssetProviderRejectsUntrustedCacheInputs()
+    {
+        QTemporaryDir cacheDir(workRoot() + QStringLiteral("/tst_verified_assets-XXXXXX"));
+        QVERIFY(cacheDir.isValid());
+        const QString appName = QStringLiteral("trusted_ui");
+        const QString assetDir = cacheDir.path() + QStringLiteral("/verified_assets/") + appName;
+        QVERIFY(QDir().mkpath(assetDir));
+        VerifiedAssetImageProvider provider(appName, {cacheDir.path()});
+
+        const QByteArray redPng = encodedImage(QSize(2, 1), QImage::Format_RGBA8888,
+                                                QColor(Qt::red), "PNG");
+        QVERIFY2(!redPng.isEmpty(), "failed to create valid PNG fixture");
+        const QString redDigest = QString::fromLatin1(
+            QCryptographicHash::hash(redPng, QCryptographicHash::Sha256).toHex());
+        const QString redPath = assetDir + QLatin1Char('/') + redDigest + ".png";
+        writeBytes(redPath, redPng);
+
+        QSize servedSize;
+        const QImage served = provider.requestImage(redDigest, &servedSize, {});
+        QVERIFY2(!served.isNull(), "valid digest-addressed PNG did not render");
+        QCOMPARE(servedSize, QSize(2, 1));
+        QCOMPARE(served.pixelColor(0, 0), QColor(Qt::red));
+        QVERIFY(provider.requestImage(QStringLiteral("../etc/passwd"), nullptr, {}).isNull());
+
+        const QByteArray bluePng = encodedImage(QSize(2, 1), QImage::Format_RGBA8888,
+                                                 QColor(Qt::blue), "PNG");
+        QVERIFY2(!bluePng.isEmpty(), "failed to create replacement PNG fixture");
+        writeBytes(redPath, bluePng);
+        QVERIFY2(provider.requestImage(redDigest, nullptr, {}).isNull(),
+                 "cache replacement changed the bytes behind a digest handle");
+
+        const QByteArray jpeg = encodedImage(QSize(2, 1), QImage::Format_RGB32,
+                                              QColor(Qt::green), "JPEG");
+        QVERIFY2(!jpeg.isEmpty(), "failed to create JPEG fixture");
+        const QString jpegDigest = QString::fromLatin1(
+            QCryptographicHash::hash(jpeg, QCryptographicHash::Sha256).toHex());
+        writeBytes(assetDir + QLatin1Char('/') + jpegDigest + ".png", jpeg);
+        QVERIFY2(provider.requestImage(jpegDigest, nullptr, {}).isNull(),
+                 "MIME-confused JPEG was accepted as a verified PNG");
+
+        QTemporaryDir outsideDir(workRoot() + QStringLiteral("/tst_verified_assets-outside-XXXXXX"));
+        QVERIFY(outsideDir.isValid());
+        const QString outsidePath = outsideDir.path() + QStringLiteral("/asset.png");
+        writeBytes(outsidePath, redPng);
+        QVERIFY(QFile::remove(redPath));
+        QVERIFY2(QFile::link(outsidePath, redPath),
+                 "failed to create cache-escape link fixture");
+        QVERIFY2(provider.requestImage(redDigest, nullptr, {}).isNull(),
+                 "symlinked asset outside the app cache root was accepted");
+
+        const QByteArray oversizedPng = encodedImage(
+            QSize(4097, 4096), QImage::Format_RGBA8888, QColor(Qt::black), "PNG");
+        QVERIFY2(!oversizedPng.isEmpty(), "failed to create oversized PNG fixture");
+        const QString oversizedDigest = QString::fromLatin1(
+            QCryptographicHash::hash(oversizedPng, QCryptographicHash::Sha256).toHex());
+        writeBytes(assetDir + QLatin1Char('/') + oversizedDigest + ".png", oversizedPng);
+        QVERIFY2(provider.requestImage(oversizedDigest, nullptr, {}).isNull(),
+                 "oversized decoded raster was accepted");
+    }
+
+    void verifiedAssetProviderRejectsInRootAliases()
+    {
+        QTemporaryDir dir(workRoot() + QStringLiteral("/tst_verified_aliases-XXXXXX"));
+        QVERIFY(dir.isValid());
+
+        const QString producerRoot = dir.path() + QStringLiteral("/producer/instance");
+        const QString victimApp = QStringLiteral("victim_ui");
+        const QString attackerApp = QStringLiteral("attacker_ui");
+        const QString victimDir =
+            producerRoot + QStringLiteral("/verified_assets/") + victimApp;
+        const QString attackerDir =
+            producerRoot + QStringLiteral("/verified_assets/") + attackerApp;
+        QVERIFY(QDir().mkpath(victimDir));
+
+        const QByteArray redPng = encodedImage(
+            QSize(2, 1), QImage::Format_RGBA8888, QColor(Qt::red), "PNG");
+        QVERIFY2(!redPng.isEmpty(), "failed to create valid PNG fixture");
+        const QString digest = QString::fromLatin1(
+            QCryptographicHash::hash(redPng, QCryptographicHash::Sha256).toHex());
+        writeBytes(victimDir + QLatin1Char('/') + digest + QStringLiteral(".png"),
+                   redPng);
+
+        QVERIFY2(QFile::link(victimDir, attackerDir),
+                 "failed to create in-root app alias fixture");
+        QVERIFY(QFileInfo(attackerDir).isSymLink());
+        VerifiedAssetImageProvider attackerProvider(attackerApp, {producerRoot});
+        QVERIFY2(attackerProvider.requestImage(digest, nullptr, {}).isNull(),
+                 "app-scoped root alias exposed another app's verified asset");
+
+        const QString caseAlias = victimApp.toUpper();
+        const QString caseAliasDir =
+            producerRoot + QStringLiteral("/verified_assets/") + caseAlias;
+        if (QFileInfo(caseAliasDir).exists()) {
+            VerifiedAssetImageProvider caseAliasProvider(caseAlias, {producerRoot});
+            QVERIFY2(caseAliasProvider.requestImage(digest, nullptr, {}).isNull(),
+                     "case-only app alias exposed another app's verified asset");
+        }
+    }
+
+    void verifiedAssetProviderUsesOnlyDeclaredProducerRoots()
+    {
+        QTemporaryDir moduleDataDir(workRoot() + QStringLiteral("/tst_verified_producers-XXXXXX"));
+        QVERIFY(moduleDataDir.isValid());
+        QVERIFY(QDir().mkpath(moduleDataDir.path() + QStringLiteral("/palace_core/instance-a")));
+        QVERIFY(QDir().mkpath(moduleDataDir.path() + QStringLiteral("/palace_core/instance-b")));
+        QVERIFY(QDir().mkpath(moduleDataDir.path() + QStringLiteral("/unrelated_core/instance-b")));
+
+        QStringList producers;
+        QString error;
+        QVERIFY(VerifiedAssetImageProvider::validateProducerDeclarations(
+            {QStringLiteral("palace_core")},
+            {QStringLiteral("palace_core"), QStringLiteral("unrelated_core")},
+            &producers, &error));
+        QCOMPARE(producers, QStringList{QStringLiteral("palace_core")});
+        QVERIFY2(!VerifiedAssetImageProvider::validateProducerDeclarations(
+                     {QStringLiteral("unrelated_core")},
+                     {QStringLiteral("palace_core")}, &producers, &error),
+                 "producer outside direct dependencies was accepted");
+        QVERIFY2(!VerifiedAssetImageProvider::validateProducerDeclarations(
+                     {QStringLiteral("palace_core"), QStringLiteral("palace_core")},
+                     {QStringLiteral("palace_core")}, &producers, &error),
+                 "duplicate producer declaration was accepted");
+
+        const QStringList roots = VerifiedAssetImageProvider::producerPersistenceRoots(
+            QStringLiteral("logos_palace_ui"), {QStringLiteral("palace_core")}, moduleDataDir.path());
+        QCOMPARE(roots.size(), 1);
+        QVERIFY(roots.at(0).endsWith(QStringLiteral("/palace_core/instance-a")));
+        QVERIFY(!roots.at(0).endsWith(QStringLiteral("/palace_core/instance-b")));
+        QVERIFY(!roots.at(0).contains(QStringLiteral("unrelated_core")));
+
+        QVERIFY(QDir().mkpath(
+            moduleDataDir.path() + QStringLiteral("/actual_core/instance-c")));
+        const QString declaredAlias =
+            moduleDataDir.path() + QStringLiteral("/declared_core");
+        QVERIFY2(QFile::link(
+                     moduleDataDir.path() + QStringLiteral("/actual_core"),
+                     declaredAlias),
+                 "failed to create in-root producer alias fixture");
+        QVERIFY(QFileInfo(declaredAlias).isSymLink());
+        QVERIFY2(VerifiedAssetImageProvider::producerPersistenceRoots(
+                     QStringLiteral("consumer_ui"),
+                     {QStringLiteral("declared_core")},
+                     moduleDataDir.path()).isEmpty(),
+                 "declared producer alias exposed another module's persistence root");
+
+        const QString mixedProducer =
+            moduleDataDir.path() + QStringLiteral("/mixed_core");
+        QVERIFY(QDir().mkpath(mixedProducer + QStringLiteral("/instance-b")));
+        QVERIFY2(QFile::link(
+                     moduleDataDir.path() + QStringLiteral("/actual_core/instance-c"),
+                     mixedProducer + QStringLiteral("/instance-a")),
+                 "failed to create first-instance alias fixture");
+        QVERIFY(QFileInfo(
+            mixedProducer + QStringLiteral("/instance-a")).isSymLink());
+        QVERIFY2(VerifiedAssetImageProvider::producerPersistenceRoots(
+                     QStringLiteral("consumer_ui"),
+                     {QStringLiteral("mixed_core")},
+                     moduleDataDir.path()).isEmpty(),
+                 "invalid active instance fell through to a later instance");
+    }
+
+    void verifiedAssetProducerMetadataRecoversInstalledVariantDeclaration()
+    {
+        QTemporaryDir installDir(
+            workRoot() + QStringLiteral("/tst_verified_metadata-XXXXXX"));
+        QVERIFY(installDir.isValid());
+        writeFile(
+            installDir.path() + QStringLiteral("/metadata.json"),
+            QStringLiteral(R"({"verified_asset_producers":["palace_core"]})"));
+
+        const QVariantMap packageMetadata{
+            {QStringLiteral("installDir"), installDir.path()}};
+        const QVariantList directDependencies{QStringLiteral("palace_core")};
+        QStringList producers;
+        QString error;
+        QVERIFY2(VerifiedAssetProducerMetadata::resolve(
+                     packageMetadata, directDependencies, &producers, &error),
+                 qPrintable(error));
+        QCOMPARE(producers, QStringList{QStringLiteral("palace_core")});
+
+        QVariantMap ipcMetadata = packageMetadata;
+        ipcMetadata.insert(
+            QStringLiteral("verified_asset_producers"),
+            QVariantList{QStringLiteral("palace_core")});
+        writeFile(installDir.path() + QStringLiteral("/metadata.json"),
+                  QStringLiteral(R"({"verified_asset_producers":"invalid"})"));
+        QVERIFY2(VerifiedAssetProducerMetadata::resolve(
+                     ipcMetadata, directDependencies, &producers, &error),
+                 qPrintable(error));
+        QCOMPARE(producers, QStringList{QStringLiteral("palace_core")});
+
+        writeFile(installDir.path() + QStringLiteral("/metadata.json"),
+                  QStringLiteral(R"({"name":"no-capability-ui"})"));
+        QVERIFY2(VerifiedAssetProducerMetadata::resolve(
+                     packageMetadata, directDependencies, &producers, &error),
+                 qPrintable(error));
+        QVERIFY(producers.isEmpty());
+    }
+
+    void verifiedAssetProducerMetadataRejectsInvalidDeclarations()
+    {
+        QTemporaryDir installDir(
+            workRoot() + QStringLiteral("/tst_verified_metadata-invalid-XXXXXX"));
+        QVERIFY(installDir.isValid());
+        const QString metadataPath =
+            installDir.path() + QStringLiteral("/metadata.json");
+        const QVariantMap packageMetadata{
+            {QStringLiteral("installDir"), installDir.path()}};
+        const QVariantList directDependencies{QStringLiteral("palace_core")};
+        QStringList producers;
+        QString error;
+
+        writeFile(metadataPath,
+                  QStringLiteral(R"({"verified_asset_producers":"palace_core"})"));
+        QVERIFY(!VerifiedAssetProducerMetadata::resolve(
+            packageMetadata, directDependencies, &producers, &error));
+        QVERIFY(error.contains(QStringLiteral("must be an array")));
+
+        writeFile(metadataPath,
+                  QStringLiteral(R"({"verified_asset_producers":[7]})"));
+        QVERIFY(!VerifiedAssetProducerMetadata::resolve(
+            packageMetadata, directDependencies, &producers, &error));
+        QVERIFY(error.contains(QStringLiteral("entries must be strings")));
+
+        writeFile(
+            metadataPath,
+            QStringLiteral(R"({"verified_asset_producers":["unrelated_core"]})"));
+        QVERIFY(!VerifiedAssetProducerMetadata::resolve(
+            packageMetadata, directDependencies, &producers, &error));
+        QVERIFY(error.contains(QStringLiteral("direct core dependency")));
+
+        QVariantMap malformedCatalogMetadata = packageMetadata;
+        malformedCatalogMetadata.insert(
+            QStringLiteral("verified_asset_producers"),
+            QStringLiteral("palace_core"));
+        QVERIFY(!VerifiedAssetProducerMetadata::resolve(
+            malformedCatalogMetadata, directDependencies, &producers, &error));
+        QVERIFY(error.contains(QStringLiteral("must be an array")));
+    }
+
+    void verifiedAssetProducerMetadataRejectsUnsafeFiles()
+    {
+        QTemporaryDir installDir(
+            workRoot() + QStringLiteral("/tst_verified_metadata-files-XXXXXX"));
+        QTemporaryDir outsideDir(
+            workRoot() + QStringLiteral("/tst_verified_metadata-outside-XXXXXX"));
+        QVERIFY(installDir.isValid());
+        QVERIFY(outsideDir.isValid());
+        const QString metadataPath =
+            installDir.path() + QStringLiteral("/metadata.json");
+        const QString outsidePath =
+            outsideDir.path() + QStringLiteral("/metadata.json");
+        const QVariantMap packageMetadata{
+            {QStringLiteral("installDir"), installDir.path()}};
+        const QVariantList directDependencies{QStringLiteral("palace_core")};
+        QStringList producers;
+        QString error;
+
+        writeFile(
+            outsidePath,
+            QStringLiteral(R"({"verified_asset_producers":["palace_core"]})"));
+        QVERIFY(QFile::link(outsidePath, metadataPath));
+        QVERIFY(QFileInfo(metadataPath).isSymLink());
+        QVERIFY(!VerifiedAssetProducerMetadata::resolve(
+            packageMetadata, directDependencies, &producers, &error));
+        QVERIFY(error.contains(QStringLiteral("escapes installDir")));
+
+        QVERIFY(QFile::remove(metadataPath));
+        const QString insideTarget =
+            installDir.path() + QStringLiteral("/real-metadata.json");
+        writeFile(
+            insideTarget,
+            QStringLiteral(R"({"verified_asset_producers":["palace_core"]})"));
+        QVERIFY(QFile::link(insideTarget, metadataPath));
+        QVERIFY(QFileInfo(metadataPath).isSymLink());
+        QVERIFY(!VerifiedAssetProducerMetadata::resolve(
+            packageMetadata, directDependencies, &producers, &error));
+        QVERIFY(error.contains(QStringLiteral("must not be a symlink")));
+
+        QVERIFY(QFile::remove(metadataPath));
+        QVERIFY(QDir().mkpath(metadataPath));
+        QVERIFY(!VerifiedAssetProducerMetadata::resolve(
+            packageMetadata, directDependencies, &producers, &error));
+        QVERIFY(error.contains(QStringLiteral("not a regular file")));
+    }
+
+    void verifiedAssetProducerMetadataRejectsMalformedAndOversizedJson()
+    {
+        QTemporaryDir installDir(
+            workRoot() + QStringLiteral("/tst_verified_metadata-json-XXXXXX"));
+        QVERIFY(installDir.isValid());
+        const QString metadataPath =
+            installDir.path() + QStringLiteral("/metadata.json");
+        const QVariantMap packageMetadata{
+            {QStringLiteral("installDir"), installDir.path()}};
+        const QVariantList directDependencies{QStringLiteral("palace_core")};
+        QStringList producers;
+        QString error;
+
+        writeFile(metadataPath, QStringLiteral("{not-json"));
+        QVERIFY(!VerifiedAssetProducerMetadata::resolve(
+            packageMetadata, directDependencies, &producers, &error));
+        QVERIFY(error.contains(QStringLiteral("not a JSON object")));
+
+        writeBytes(metadataPath, QByteArray(64 * 1024 + 1, ' '));
+        QVERIFY(!VerifiedAssetProducerMetadata::resolve(
+            packageMetadata, directDependencies, &producers, &error));
+        QVERIFY(error.contains(QStringLiteral("exceeds size bounds")));
     }
 
     // ----------------------------------------------------------------------

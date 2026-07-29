@@ -21,11 +21,16 @@ namespace QmlSandbox {
 // plugin search path, and keeps Qt's default pluginPathList intact.
 //
 // `appLibDir` is the vetted application library dir (in production
-// <appDir>/../lib); tests pass an explicit value (often empty). Returns the set
-// of import roots that were treated as untrusted — useful for assertions.
+// <appDir>/../lib); tests pass an explicit value (often empty).
+// `verifiedAssetProviderName` is the per-engine internal provider ID used to
+// rewrite the stable public verified-asset URL. The interceptor also gives each
+// resolution a unique internal cache key so revoked handles are revalidated.
+// An empty value grants no image provider URL capability. Returns the set of
+// import roots that were treated as untrusted — useful for assertions.
 QStringList configure(QQmlEngine* engine,
                       const QString& installDir,
                       const QString& qmlViewPath,
-                      const QString& appLibDir);
+                      const QString& appLibDir,
+                      const QString& verifiedAssetProviderName = {});
 
 } // namespace QmlSandbox

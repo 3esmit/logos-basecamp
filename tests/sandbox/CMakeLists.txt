@@ -34,16 +34,20 @@ add_executable(tst_qml_sandbox
     tst_qml_sandbox.cpp
     ${BASECAMP_SRC}/restricted/QmlSandbox.cpp
     ${BASECAMP_SRC}/restricted/RestrictedUrlInterceptor.cpp
+    ${BASECAMP_SRC}/restricted/VerifiedAssetImageProvider.cpp
+    ${BASECAMP_SRC}/restricted/VerifiedAssetProducerMetadata.cpp
     ${BASECAMP_SRC}/restricted/DenyAllNAMFactory.cpp
     ${BASECAMP_SRC}/restricted/DenyAllNetworkAccessManager.cpp
     ${BASECAMP_SRC}/restricted/DenyAllReply.cpp
 )
-target_include_directories(tst_qml_sandbox PRIVATE ${BASECAMP_SRC})
+target_include_directories(tst_qml_sandbox PRIVATE
+    ${BASECAMP_SRC}
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../app/utils)
 target_compile_definitions(tst_qml_sandbox PRIVATE
     EVIL_PLUGIN_PATH="${EVIL_PLUGIN_PATH}"
     EVIL_APP_DIR="${CMAKE_CURRENT_SOURCE_DIR}/evil_app")
 target_link_libraries(tst_qml_sandbox PRIVATE
-    Qt6::Core Qt6::Qml Qt6::Quick Qt6::Network Qt6::Test)
+    Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick Qt6::Network Qt6::Test)
 add_dependencies(tst_qml_sandbox evil_plugin)
 
 # Register each test slot as its OWN ctest case (separate process). Qt caches
@@ -63,6 +67,16 @@ foreach(slot
     sandboxAllowsFileUnderInstallDir
     sandboxPassesThroughNonExistentProbe
     sandboxAllowsQrcScheme
+    sandboxAllowsOnlyStrictVerifiedAssetHandle
+    verifiedAssetProviderIsolatesQmlEngineCaches
+    verifiedAssetProviderRevalidatesRevokedHandles
+    verifiedAssetProviderRejectsUntrustedCacheInputs
+    verifiedAssetProviderRejectsInRootAliases
+    verifiedAssetProviderUsesOnlyDeclaredProducerRoots
+    verifiedAssetProducerMetadataRecoversInstalledVariantDeclaration
+    verifiedAssetProducerMetadataRejectsInvalidDeclarations
+    verifiedAssetProducerMetadataRejectsUnsafeFiles
+    verifiedAssetProducerMetadataRejectsMalformedAndOversizedJson
     evilApp_allProbesBlocked
     evilApp_qmldirPluginImportRejected)
   add_test(NAME qml_sandbox.${slot} COMMAND tst_qml_sandbox ${slot})

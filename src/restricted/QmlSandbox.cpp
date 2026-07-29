@@ -13,7 +13,8 @@ namespace QmlSandbox {
 QStringList configure(QQmlEngine* engine,
                       const QString& installDir,
                       const QString& qmlViewPath,
-                      const QString& appLibDir)
+                      const QString& appLibDir,
+                      const QString& verifiedAssetProviderName)
 {
     const QStringList qtDefaultPaths = engine->importPathList();
 
@@ -76,7 +77,8 @@ QStringList configure(QQmlEngine* engine,
         if (!canon.isEmpty() && !allowedRoots.contains(canon))
             allowedRoots << canon;
     }
-    engine->addUrlInterceptor(new RestrictedUrlInterceptor(allowedRoots, untrustedRoots));
+    engine->addUrlInterceptor(new RestrictedUrlInterceptor(
+        allowedRoots, untrustedRoots, verifiedAssetProviderName));
     return untrustedRoots;
 }
 
