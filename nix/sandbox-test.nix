@@ -55,6 +55,7 @@ pkgs.stdenv.mkDerivation {
     runHook preInstall
     mkdir -p $out
     cp build-sandbox-test/tst_qml_sandbox $out/ 2>/dev/null || true
+    cp build-sandbox-test/tst_user_selected_file_bridge $out/ 2>/dev/null || true
     echo "ui_qml sandbox-escape regression test passed" > $out/result.txt
     runHook postInstall
   '';

@@ -28,6 +28,7 @@
 #include "logos_api_client.h"
 #include "token_manager.h"
 #include "restricted/QmlSandbox.h"
+#include "restricted/UserSelectedFileBridge.h"
 #include "restricted/VerifiedAssetImageProvider.h"
 #include <ViewModuleHost.h>
 
@@ -361,6 +362,8 @@ void PluginLoader::finishUiQmlLoad(QQuickWidget* qmlWidget,
     bridge->setParent(qmlWidget);
     qmlWidget->rootContext()->setContextProperty("logos", bridge);
     qmlWidget->rootContext()->setContextProperty("isActiveTab", true);
+    qmlWidget->rootContext()->setContextProperty(
+        "userFiles", new UserSelectedFileBridge(qmlWidget, qmlWidget));
     qmlWidget->setSource(QUrl::fromLocalFile(request.qmlViewPath));
 
     if (!request.iconPath.isEmpty())

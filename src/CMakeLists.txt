@@ -130,6 +130,7 @@ set(SOURCES
     restricted/DenyAllNAMFactory.cpp
     restricted/RestrictedUrlInterceptor.cpp
     restricted/QmlSandbox.cpp
+    restricted/UserSelectedFileBridge.cpp
     restricted/VerifiedAssetImageProvider.cpp
     restricted/VerifiedAssetProducerMetadata.cpp
 )
