@@ -5,7 +5,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 
-find_package(Qt6 REQUIRED COMPONENTS Core Qml Quick Network Test)
+find_package(Qt6 REQUIRED COMPONENTS Core Qml Quick Network Test Widgets)
 
 enable_testing()
 
@@ -49,6 +49,20 @@ target_compile_definitions(tst_qml_sandbox PRIVATE
 target_link_libraries(tst_qml_sandbox PRIVATE
     Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick Qt6::Network Qt6::Test)
 add_dependencies(tst_qml_sandbox evil_plugin)
+
+add_executable(tst_user_selected_file_bridge
+    tst_user_selected_file_bridge.cpp
+    ${BASECAMP_SRC}/restricted/UserSelectedFileBridge.cpp
+)
+target_include_directories(tst_user_selected_file_bridge PRIVATE ${BASECAMP_SRC})
+target_link_libraries(tst_user_selected_file_bridge PRIVATE
+    Qt6::Core Qt6::Test Qt6::Widgets)
+
+add_test(
+    NAME qml_sandbox.userSelectedFileBridge
+    COMMAND tst_user_selected_file_bridge)
+set_tests_properties(qml_sandbox.userSelectedFileBridge PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
 # Register each test slot as its OWN ctest case (separate process). Qt caches
 # loaded QML plugins process-wide (modulesForWhichPluginsHaveBeenLoaded), so
