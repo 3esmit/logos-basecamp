@@ -8,21 +8,21 @@
     logos-cpp-sdk.url = "github:logos-co/logos-cpp-sdk";
     logos-cpp-sdk.inputs.logos-protocol.follows = "logos-protocol";
     logos-protocol = {
-      url = "github:logos-co/logos-protocol";
+      url = "github:3esmit/logos-protocol";
       inputs.logos-nix.follows = "logos-nix";
     };
     logos-qt-sdk = {
-      url = "github:logos-co/logos-qt-sdk";
+      url = "github:3esmit/logos-qt-sdk";
       inputs.logos-nix.follows = "logos-nix";
       inputs.logos-protocol.follows = "logos-protocol";
       inputs.logos-cpp-sdk.follows = "logos-cpp-sdk";
     };
     logos-module.url = "github:logos-co/logos-module";
-    logos-liblogos.url = "github:logos-co/logos-liblogos";
+    logos-liblogos.url = "github:3esmit/logos-liblogos";
     logos-package-manager.url = "github:logos-co/logos-package-manager";
     logos-package-manager-module.url = "github:logos-co/logos-package-manager-module";
     logos-package-downloader-module.url = "github:logos-co/logos-package-downloader-module";
-    logos-capability-module.url = "github:logos-co/logos-capability-module";
+    logos-capability-module.url = "github:3esmit/logos-capability-module";
     logos-package.url = "github:logos-co/logos-package";
     logos-package-manager-ui.url = "github:logos-co/logos-package-manager-ui";
     logos-design-system.url = "github:logos-co/logos-design-system";
@@ -284,7 +284,7 @@
           # shape as sandbox-test — standalone QtTest project, no app launch,
           # no IPC. Build: nix build .#unit-tests
           unit-tests = import ./nix/unit-tests.nix {
-            inherit pkgs src logosPackageHeaders;
+            inherit pkgs src logosPackageHeaders logosProtocolPkg logosQtSdk;
           };
 
           # QML component tests (Qt Quick Test)

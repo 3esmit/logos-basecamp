@@ -39,10 +39,22 @@ public:
     // Returns true on success. Wraps logos_core_load_module(name, true)
     // (the C API function that also resolves forward deps before loading).
     bool loadModule(const QString& name);
+    // Explicit runtime-address variant. A non-empty instance ID always means
+    // one independent module runtime; it never aliases the default instance.
+    // Dependencies remain default-instance package dependencies in liblogos.
+    bool loadModuleInstance(const QString& moduleName, const QString& instanceId);
     // Returns true on success. Wraps logos_core_unload_module — this does NOT
     // cascade. Caller is responsible for cascade semantics (see
     // unloadModuleWithDependents).
     bool unloadModule(const QString& name);
+    // Unloads exactly one explicit runtime. Scoped unloads deliberately do
+    // not cascade package-level dependents because siblings may share them.
+    bool unloadModuleInstance(const QString& moduleName, const QString& instanceId);
+    bool isModuleInstanceLoaded(const QString& moduleName,
+                                const QString& instanceId) const;
+    // JSON array from liblogos with the complete active runtime address,
+    // endpoint, PID, and default-instance marker for every loaded module.
+    QString moduleInstancesInfo() const;
     // Cascade variant — tears down `name` and all currently-loaded modules
     // that depend on it, leaves-first. Returns true on full success; false
     // if any individual unload step failed (the cascade may have made
@@ -67,6 +79,14 @@ public:
     Q_INVOKABLE QString callMethod(const QString& moduleName,
                                    const QString& methodName,
                                    const QString& argsJson);
+    QString getModuleInstanceMethods(const QString& moduleName,
+                                     const QString& instanceId);
+    QString getModuleInstanceEvents(const QString& moduleName,
+                                    const QString& instanceId);
+    QString callModuleInstanceMethod(const QString& moduleName,
+                                     const QString& instanceId,
+                                     const QString& methodName,
+                                     const QString& argsJson);
 
 signals:
     // Emitted by refresh() and after every stats-timer tick. MainUIBackend
