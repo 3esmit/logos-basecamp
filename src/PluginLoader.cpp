@@ -21,6 +21,7 @@
 #include <memory>
 
 #include "CoreModuleManager.h"
+#include "DependencyMetadata.h"
 #include "IComponent.h"
 #include "LogosQmlBridge.h"
 #include "logos_api.h"
@@ -94,7 +95,7 @@ void PluginLoader::loadCoreDependencies(const PluginLoadRequest& request)
     // Every core-plugin load goes through CoreModuleManager so the logos_core_*
     // C API is centralised in one place.
     for (const QVariant& dep : request.coreDependencies) {
-        QString depName = dep.toString();
+        const QString depName = DependencyMetadata::name(dep);
         if (depName.isEmpty())
             continue;
         if (!m_coreModuleManager) {
