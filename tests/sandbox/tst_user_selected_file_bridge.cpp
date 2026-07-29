@@ -1,13 +1,15 @@
 #include <QtTest/QtTest>
 
+#include <QDialog>
 #include <QFile>
+#include <QFileDialog>
 #include <QFileInfo>
 #include <QPointer>
 #include <QQueue>
+#include <QSignalSpy>
 #include <QTemporaryDir>
+#include <QTimer>
 #include <QWidget>
-
-#include <functional>
 
 #include "restricted/UserSelectedFileBridge.h"
 
@@ -21,22 +23,112 @@ void writeBytes(const QString& path, const QByteArray& contents)
     QCOMPARE(file.write(contents), contents.size());
 }
 
+class TestFileDialog final : public QFileDialog
+{
+public:
+    void finishAccepted(const QString& path)
+    {
+        selectFile(path);
+        done(QDialog::Accepted);
+    }
+
+    void finishRejected()
+    {
+        done(QDialog::Rejected);
+    }
+};
+
 class TestFileBridge final : public UserSelectedFileBridge
 {
 public:
-    explicit TestFileBridge(QObject* parent = nullptr)
-        : UserSelectedFileBridge(nullptr, parent)
+    enum class OutcomeType {
+        Accept,
+        Reject,
+        Pending,
+    };
+
+    struct Outcome {
+        OutcomeType type;
+        QString path;
+    };
+
+    explicit TestFileBridge(QWidget* dialogParent = nullptr,
+                            QObject* parent = nullptr)
+        : UserSelectedFileBridge(dialogParent, parent)
     {
     }
 
-    std::function<QString(const QStringList&)> picker;
+    void enqueueSelection(const QString& path)
+    {
+        m_outcomes.enqueue({OutcomeType::Accept, path});
+    }
+
+    void enqueueCancellation()
+    {
+        m_outcomes.enqueue({OutcomeType::Reject, {}});
+    }
+
+    void enqueuePending()
+    {
+        m_outcomes.enqueue({OutcomeType::Pending, {}});
+    }
+
+    QPointer<QFileDialog> lastDialog;
+    int dialogsCreated = 0;
 
 protected:
-    QString chooseFile(const QStringList& nameFilters) override
+    QFileDialog* createFileDialog() override
     {
-        return picker ? picker(nameFilters) : QString();
+        auto* dialog = new TestFileDialog;
+        dialog->setOption(QFileDialog::DontUseNativeDialog);
+        lastDialog = dialog;
+        ++dialogsCreated;
+
+        const Outcome outcome = m_outcomes.isEmpty()
+            ? Outcome{OutcomeType::Pending, {}}
+            : m_outcomes.dequeue();
+        if (outcome.type == OutcomeType::Accept) {
+            QTimer::singleShot(0, dialog, [dialog, path = outcome.path]() {
+                dialog->finishAccepted(path);
+            });
+        } else if (outcome.type == OutcomeType::Reject) {
+            QTimer::singleShot(0, dialog, [dialog]() {
+                dialog->finishRejected();
+            });
+        }
+        return dialog;
     }
+
+private:
+    QQueue<Outcome> m_outcomes;
 };
+
+struct Completion {
+    QString requestId;
+    QString completedRequestId;
+    QVariantMap selection;
+    bool completed = false;
+};
+
+Completion completeNext(TestFileBridge& bridge,
+                        qint64 maxBytes,
+                        const QStringList& nameFilters = {})
+{
+    QSignalSpy spy(&bridge, &UserSelectedFileBridge::fileSelectionCompleted);
+    Completion completion;
+    completion.requestId = bridge.openFile(nameFilters, maxBytes);
+    if (completion.requestId.isEmpty())
+        return completion;
+
+    completion.completed = !spy.isEmpty() || spy.wait(2000);
+    if (!completion.completed)
+        return completion;
+
+    const QVariantList arguments = spy.takeFirst();
+    completion.completedRequestId = arguments.at(0).toString();
+    completion.selection = arguments.at(1).toMap();
+    return completion;
+}
 
 } // namespace
 
@@ -53,21 +145,26 @@ private slots:
         writeBytes(path, QByteArrayLiteral("small"));
 
         TestFileBridge bridge;
-        QQueue<QString> selections;
-        selections.enqueue(QString());
-        for (int i = 0; i < UserSelectedFileBridge::kMaxHandles; ++i)
-            selections.enqueue(path);
-        bridge.picker = [&selections](const QStringList&) {
-            return selections.dequeue();
-        };
+        bridge.enqueueCancellation();
+        Completion cancellation = completeNext(bridge, 1024);
+        QVERIFY(cancellation.completed);
+        QCOMPARE(cancellation.completedRequestId, cancellation.requestId);
+        QVERIFY(cancellation.selection.isEmpty());
 
-        QVERIFY(bridge.openFile({}, 1024).isEmpty());
-        for (int i = 0; i < UserSelectedFileBridge::kMaxHandles; ++i)
-            QVERIFY(!bridge.openFile({}, 1024).isEmpty());
-        QVERIFY(selections.isEmpty());
+        for (int i = 0; i < UserSelectedFileBridge::kMaxHandles; ++i) {
+            bridge.enqueueSelection(path);
+            Completion selection = completeNext(bridge, 1024);
+            QVERIFY(selection.completed);
+            QCOMPARE(selection.completedRequestId, selection.requestId);
+            QVERIFY(!selection.selection.isEmpty());
+        }
+
+        QCOMPARE(bridge.openFile({}, 1024), QString());
+        QCOMPARE(bridge.dialogsCreated,
+                 UserSelectedFileBridge::kMaxHandles + 1);
     }
 
-    void selectionExposesOnlyOpaqueMetadataAndStableSnapshot()
+    void selectionCompletesAsynchronouslyWithoutExposingPath()
     {
         QTemporaryDir dir;
         QVERIFY(dir.isValid());
@@ -76,10 +173,19 @@ private slots:
         writeBytes(path, original);
 
         TestFileBridge bridge;
-        bridge.picker = [path](const QStringList&) { return path; };
+        bridge.enqueueSelection(path);
+        QSignalSpy spy(
+            &bridge, &UserSelectedFileBridge::fileSelectionCompleted);
 
-        const QVariantMap selection =
+        const QString requestId =
             bridge.openFile({QStringLiteral("Images (*.png)")}, 1024);
+        QVERIFY(!requestId.isEmpty());
+        QCOMPARE(spy.count(), 0);
+        QVERIFY(spy.wait(2000));
+
+        const QVariantList arguments = spy.takeFirst();
+        QCOMPARE(arguments.at(0).toString(), requestId);
+        const QVariantMap selection = arguments.at(1).toMap();
         QCOMPARE(selection.size(), 3);
         QVERIFY(selection.contains(QStringLiteral("handle")));
         QVERIFY(selection.contains(QStringLiteral("displayName")));
@@ -89,8 +195,7 @@ private slots:
         QCOMPARE(selection.value(QStringLiteral("byteLength")).toLongLong(),
                  original.size());
         QVERIFY(!selection.values().contains(path));
-        QVERIFY(!selection.value(QStringLiteral("handle")).toString().contains(
-            QStringLiteral("selected")));
+        QVERIFY(!requestId.contains(QStringLiteral("selected")));
 
         writeBytes(path, QByteArrayLiteral("changed after selection"));
         const QVariantMap chunk = bridge.readNextChunk(
@@ -114,10 +219,11 @@ private slots:
         writeBytes(path, expected);
 
         TestFileBridge bridge;
-        bridge.picker = [path](const QStringList&) { return path; };
+        bridge.enqueueSelection(path);
+        const Completion completion = completeNext(bridge, expected.size());
+        QVERIFY(completion.completed);
         const QString handle =
-            bridge.openFile({}, expected.size())
-                .value(QStringLiteral("handle")).toString();
+            completion.selection.value(QStringLiteral("handle")).toString();
         QVERIFY(!handle.isEmpty());
 
         QByteArray actual;
@@ -150,10 +256,11 @@ private slots:
 
         TestFileBridge viewA;
         TestFileBridge viewB;
-        viewA.picker = [path](const QStringList&) { return path; };
+        viewA.enqueueSelection(path);
+        const Completion completion = completeNext(viewA, 1024);
+        QVERIFY(completion.completed);
         const QString handle =
-            viewA.openFile({}, 1024)
-                .value(QStringLiteral("handle")).toString();
+            completion.selection.value(QStringLiteral("handle")).toString();
         QVERIFY(!handle.isEmpty());
 
         QVERIFY(viewA.readNextChunk(QStringLiteral("forged")).isEmpty());
@@ -183,21 +290,23 @@ private slots:
         const bool symlinkCreated = QFile::link(regularPath, symlinkPath);
 
         TestFileBridge bridge;
-        QQueue<QString> selections;
-        selections.enqueue(oversizePath);
-        selections.enqueue(dir.path());
-        if (symlinkCreated)
-            selections.enqueue(symlinkPath);
-        bridge.picker = [&selections](const QStringList&) {
-            return selections.dequeue();
-        };
+        bridge.enqueueSelection(oversizePath);
+        Completion oversize = completeNext(
+            bridge, UserSelectedFileBridge::kMaxFileBytes * 2);
+        QVERIFY(oversize.completed);
+        QVERIFY(oversize.selection.isEmpty());
 
-        QVERIFY(bridge.openFile({}, UserSelectedFileBridge::kMaxFileBytes * 2)
-                    .isEmpty());
-        QVERIFY(bridge.openFile({}, 1024).isEmpty());
+        bridge.enqueueSelection(dir.path());
+        Completion nonRegular = completeNext(bridge, 1024);
+        QVERIFY(nonRegular.completed);
+        QVERIFY(nonRegular.selection.isEmpty());
+
         if (symlinkCreated) {
             QVERIFY(QFileInfo(symlinkPath).isSymLink());
-            QVERIFY(bridge.openFile({}, 1024).isEmpty());
+            bridge.enqueueSelection(symlinkPath);
+            Completion symlink = completeNext(bridge, 1024);
+            QVERIFY(symlink.completed);
+            QVERIFY(symlink.selection.isEmpty());
         }
     }
 
@@ -209,45 +318,86 @@ private slots:
         writeBytes(path, QByteArrayLiteral("12345"));
 
         TestFileBridge bridge;
-        bridge.picker = [path](const QStringList&) { return path; };
+        QCOMPARE(bridge.openFile({}, 0), QString());
+        QCOMPARE(bridge.dialogsCreated, 0);
 
-        QVERIFY(bridge.openFile({}, 0).isEmpty());
-        QVERIFY(bridge.openFile({}, 4).isEmpty());
-        for (int i = 0; i < UserSelectedFileBridge::kMaxHandles; ++i)
-            QVERIFY(!bridge.openFile({}, 5).isEmpty());
-        QVERIFY(bridge.openFile({}, 5).isEmpty());
+        bridge.enqueueSelection(path);
+        Completion tooSmall = completeNext(bridge, 4);
+        QVERIFY(tooSmall.completed);
+        QVERIFY(tooSmall.selection.isEmpty());
+
+        for (int i = 0; i < UserSelectedFileBridge::kMaxHandles; ++i) {
+            bridge.enqueueSelection(path);
+            Completion selection = completeNext(bridge, 5);
+            QVERIFY(selection.completed);
+            QVERIFY(!selection.selection.isEmpty());
+        }
+        QCOMPARE(bridge.openFile({}, 5), QString());
     }
 
     void allowsOnlyOneActivePicker()
+    {
+        TestFileBridge bridge;
+        bridge.enqueuePending();
+        QSignalSpy spy(
+            &bridge, &UserSelectedFileBridge::fileSelectionCompleted);
+
+        const QString requestId = bridge.openFile({}, 1024);
+        QVERIFY(!requestId.isEmpty());
+        QCOMPARE(spy.count(), 0);
+        QCOMPARE(bridge.openFile({}, 1024), QString());
+        QCOMPARE(bridge.dialogsCreated, 1);
+
+        QVERIFY(bridge.lastDialog);
+        bridge.lastDialog->reject();
+        QCOMPARE(spy.count(), 1);
+        QCOMPARE(spy.at(0).at(0).toString(), requestId);
+        QVERIFY(spy.at(0).at(1).toMap().isEmpty());
+    }
+
+    void viewDestructionCancelsPendingSelectionWithoutCallback()
+    {
+        auto* view = new QWidget;
+        auto* bridge = new TestFileBridge(view, view);
+        bridge->enqueuePending();
+        QSignalSpy spy(
+            bridge, &UserSelectedFileBridge::fileSelectionCompleted);
+
+        QVERIFY(!bridge->openFile({}, 1024).isEmpty());
+        QPointer<TestFileBridge> bridgeGuard(bridge);
+        QPointer<QFileDialog> dialogGuard(bridge->lastDialog);
+        QVERIFY(dialogGuard);
+
+        delete view;
+        QVERIFY(bridgeGuard.isNull());
+        QVERIFY(dialogGuard.isNull());
+        QCoreApplication::processEvents();
+        QCOMPARE(spy.count(), 0);
+    }
+
+    void completionHandlerMayDestroyView()
     {
         QTemporaryDir dir;
         QVERIFY(dir.isValid());
         const QString path = dir.filePath(QStringLiteral("selected.bin"));
         writeBytes(path, QByteArrayLiteral("payload"));
 
-        TestFileBridge bridge;
-        bool attemptedReentry = false;
-        bool reentryRejected = false;
-        bridge.picker = [&bridge, &attemptedReentry, &reentryRejected,
-                         path](const QStringList&) {
-            attemptedReentry = true;
-            reentryRejected = bridge.openFile({}, 1024).isEmpty();
-            return path;
-        };
-
-        QVERIFY(!bridge.openFile({}, 1024).isEmpty());
-        QVERIFY(attemptedReentry);
-        QVERIFY(reentryRejected);
-    }
-
-    void bridgeDiesWithOwningView()
-    {
         auto* view = new QWidget;
-        auto* bridge = new UserSelectedFileBridge(view, view);
-        QPointer<UserSelectedFileBridge> guard(bridge);
+        auto* bridge = new TestFileBridge(view, view);
+        bridge->enqueueSelection(path);
+        QPointer<QWidget> viewGuard(view);
+        QPointer<TestFileBridge> bridgeGuard(bridge);
 
-        delete view;
-        QVERIFY(guard.isNull());
+        connect(bridge, &UserSelectedFileBridge::fileSelectionCompleted,
+                view, [view](const QString&, const QVariantMap&) {
+                    delete view;
+                });
+
+        QVERIFY(!bridge->openFile({}, 1024).isEmpty());
+        QPointer<QFileDialog> dialogGuard(bridge->lastDialog);
+        QTRY_VERIFY(viewGuard.isNull());
+        QVERIFY(bridgeGuard.isNull());
+        QTRY_VERIFY(dialogGuard.isNull());
     }
 };
 

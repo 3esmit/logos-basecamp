@@ -3,7 +3,6 @@
 #include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
-#include <QScopedValueRollback>
 #include <QUuid>
 
 #include <algorithm>
@@ -109,24 +108,45 @@ UserSelectedFileBridge::UserSelectedFileBridge(QWidget* dialogParent,
 
 UserSelectedFileBridge::~UserSelectedFileBridge()
 {
+    cancelPendingSelection();
     clearSnapshots();
 }
 
-QVariantMap UserSelectedFileBridge::openFile(const QStringList& nameFilters,
-                                             qint64 maxBytes)
+QString UserSelectedFileBridge::openFile(const QStringList& nameFilters,
+                                         qint64 maxBytes)
 {
-    if (m_pickerActive || maxBytes <= 0
+    if (m_dialog || !m_requestId.isEmpty() || maxBytes <= 0
         || m_snapshots.size() >= kMaxHandles
         || m_totalBytes >= kMaxViewBytes) {
         return {};
     }
 
-    QScopedValueRollback<bool> pickerGuard(m_pickerActive, true);
-    const QString path = chooseFile(nameFilters);
-    if (path.isEmpty())
+    const QString requestId = createRequestId();
+    QFileDialog* dialog = createFileDialog();
+    if (requestId.isEmpty() || !dialog) {
+        delete dialog;
         return {};
+    }
 
-    return snapshotFile(path, std::min(maxBytes, kMaxFileBytes));
+    dialog->setWindowTitle(tr("Select file"));
+    dialog->setAcceptMode(QFileDialog::AcceptOpen);
+    dialog->setFileMode(QFileDialog::ExistingFile);
+    dialog->setNameFilters(nameFilters);
+    dialog->setOption(QFileDialog::DontResolveSymlinks);
+
+    m_dialog = dialog;
+    m_requestId = requestId;
+    m_requestMaxBytes = std::min(maxBytes, kMaxFileBytes);
+    connect(dialog, &QDialog::finished, this,
+            [this, dialog](int result) {
+                completeFileSelection(dialog, result);
+            });
+
+    // QDialog::open() returns immediately and does not spin a nested event
+    // loop. The receiver-context connection above is removed automatically if
+    // this per-view bridge dies while the picker is open.
+    dialog->open();
+    return requestId;
 }
 
 QVariantMap UserSelectedFileBridge::readNextChunk(const QString& handle)
@@ -164,15 +184,9 @@ bool UserSelectedFileBridge::release(const QString& handle)
     return true;
 }
 
-QString UserSelectedFileBridge::chooseFile(const QStringList& nameFilters)
+QFileDialog* UserSelectedFileBridge::createFileDialog()
 {
-    return QFileDialog::getOpenFileName(
-        m_dialogParent,
-        tr("Select file"),
-        QString(),
-        nameFilters.join(QStringLiteral(";;")),
-        nullptr,
-        QFileDialog::DontResolveSymlinks);
+    return new QFileDialog(m_dialogParent);
 }
 
 QVariantMap UserSelectedFileBridge::snapshotFile(const QString& path,
@@ -200,6 +214,49 @@ QVariantMap UserSelectedFileBridge::snapshotFile(const QString& path,
     };
 }
 
+void UserSelectedFileBridge::completeFileSelection(QFileDialog* dialog,
+                                                   int result)
+{
+    if (dialog != m_dialog || m_requestId.isEmpty())
+        return;
+
+    const QString requestId = m_requestId;
+    const qint64 maxBytes = m_requestMaxBytes;
+    QVariantMap selection;
+    if (result == QDialog::Accepted) {
+        const QStringList files = dialog->selectedFiles();
+        if (files.size() == 1)
+            selection = snapshotFile(files.front(), maxBytes);
+    }
+
+    // Clear ownership before notifying QML. A completion handler may unload
+    // the view synchronously; detaching the already-closed dialog prevents the
+    // view destructor from deleting the signal sender mid-emission.
+    QObject::disconnect(dialog, nullptr, this, nullptr);
+    m_dialog.clear();
+    m_requestId.clear();
+    m_requestMaxBytes = 0;
+    dialog->setParent(static_cast<QWidget*>(nullptr));
+    dialog->deleteLater();
+
+    // No member access after this emission: QML may destroy this bridge.
+    emit fileSelectionCompleted(requestId, selection);
+}
+
+void UserSelectedFileBridge::cancelPendingSelection()
+{
+    QFileDialog* dialog = m_dialog.data();
+    m_dialog.clear();
+    m_requestId.clear();
+    m_requestMaxBytes = 0;
+    if (!dialog)
+        return;
+
+    QObject::disconnect(dialog, nullptr, this, nullptr);
+    dialog->close();
+    delete dialog;
+}
+
 QString UserSelectedFileBridge::createHandle() const
 {
     for (int attempt = 0; attempt < 8; ++attempt) {
@@ -210,6 +267,11 @@ QString UserSelectedFileBridge::createHandle() const
             return handle;
     }
     return {};
+}
+
+QString UserSelectedFileBridge::createRequestId() const
+{
+    return QUuid::createUuid().toString(QUuid::WithoutBraces);
 }
 
 void UserSelectedFileBridge::clearSnapshots()
