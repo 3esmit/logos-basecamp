@@ -1081,6 +1081,48 @@ private slots:
         QCOMPARE(model.rowCount(), 1);
     }
 
+    void mergeLocalOnly_uses_runtime_module_identity()
+    {
+        QVariantMap installed = makeInstalledPackage(
+            "artifact_package", "1.2.3", "H_runtime", "utilities");
+        installed.insert("moduleName", "runtime_module");
+
+        AppsModel localModel;
+        localModel.mergeLocalOnlyInstalled({installed});
+        QCOMPARE(localModel.rowCount(), 1);
+        const QModelIndex localIndex = localModel.index(0);
+        QCOMPARE(localModel.data(localIndex, AppsModel::NameRole).toString(),
+                 QStringLiteral("runtime_module"));
+
+        // PackageCoordinator keys on moduleName, so the Local row must use
+        // the same identity or a refresh clears its installed state.
+        localModel.replaceInstalledSet(
+            {{QStringLiteral("runtime_module"), QStringLiteral("1.2.3")}},
+            {{QStringLiteral("runtime_module"), QStringLiteral("H_runtime")}});
+        QCOMPARE(localModel.data(localIndex, AppsModel::InstalledVersionRole).toString(),
+                 QStringLiteral("1.2.3"));
+
+        QSignalSpy insertedSpy(&localModel, &QAbstractItemModel::rowsInserted);
+        QSignalSpy removedSpy(&localModel, &QAbstractItemModel::rowsRemoved);
+        localModel.mergeLocalOnlyInstalled({installed});
+        QCOMPARE(insertedSpy.count(), 0);
+        QCOMPARE(removedSpy.count(), 0);
+
+        // A catalog entry is likewise keyed by the loadable module name,
+        // rather than the artifact package name.
+        AppsModel catalogModel;
+        catalogModel.replaceCatalog({
+            makeCatalogRow("repo1", "runtime_module", "1.2.3", "H_runtime"),
+        });
+        catalogModel.mergeLocalOnlyInstalled({installed});
+        QCOMPARE(catalogModel.rowCount(), 1);
+        const QModelIndex catalogIndex = catalogModel.index(0);
+        QCOMPARE(catalogModel.data(catalogIndex, AppsModel::NameRole).toString(),
+                 QStringLiteral("runtime_module"));
+        QCOMPARE(catalogModel.data(catalogIndex, AppsModel::RepositoryUrlRole).toString(),
+                 QStringLiteral("repo1"));
+    }
+
     void mergeLocalOnly_refreshes_existing_local_metadata()
     {
         AppsModel model;

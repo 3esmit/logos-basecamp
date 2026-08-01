@@ -8,6 +8,15 @@
 
 namespace {
 constexpr QChar kSep = QLatin1Char('\n');
+
+// Package names identify the downloaded artifact; moduleName identifies the
+// module that Basecamp loads and manages. Older package-manager responses do
+// not carry moduleName, so retain name as the compatibility fallback.
+QString installedModuleName(const QVariantMap& package)
+{
+    const QString moduleName = package.value("moduleName").toString();
+    return moduleName.isEmpty() ? package.value("name").toString() : moduleName;
+}
 }
 
 QString AppsModel::key(const QString& repo, const QString& name)
@@ -305,8 +314,9 @@ void AppsModel::mergeLocalOnlyInstalled(const QVariantList& installedPackages)
     QSet<QString> freshNames;
     freshNames.reserve(installedPackages.size());
     for (const QVariant& v : installedPackages) {
-        const QString name = v.toMap().value("name").toString();
-        if (!name.isEmpty()) freshNames.insert(name);
+        const QVariantMap pkg = v.toMap();
+        if (pkg.value("name").toString().isEmpty()) continue;
+        freshNames.insert(installedModuleName(pkg));
     }
 
     // Prune Local rows whose module got uninstalled. Catalog rows (non-
@@ -336,8 +346,8 @@ void AppsModel::mergeLocalOnlyInstalled(const QVariantList& installedPackages)
 
     for (const QVariant& v : installedPackages) {
         const QVariantMap pkg = v.toMap();
-        const QString name = pkg.value("name").toString();
-        if (name.isEmpty()) continue;
+        if (pkg.value("name").toString().isEmpty()) continue;
+        const QString name = installedModuleName(pkg);
 
         // Only surface USER-installed packages (under Application Support)
         // as Local. Embedded packages ship inside the app bundle and are
