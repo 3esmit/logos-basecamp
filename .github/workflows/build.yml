@@ -228,6 +228,10 @@ jobs:
       - name: Integration test (UI tests)
         run: nix build .#integration-test -L
 
+      - name: Shutdown lifecycle test
+        if: matrix.arch == 'x86_64-linux'
+        run: nix build .#shutdown-test -L
+
       # Report-only non-blocking for now
       - name: Coverage report
         continue-on-error: true

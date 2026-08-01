@@ -326,8 +326,9 @@ void Window::closeEvent(QCloseEvent *event)
             );
         }
     } else {
-        // If system tray is not available, quit normally
+        // No tray means the running application would have no reachable UI.
         event->accept();
+        QApplication::quit();
     }
 }
 

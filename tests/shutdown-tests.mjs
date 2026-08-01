@@ -223,14 +223,16 @@ if (process.platform === "darwin") {
 }
 
 // Window.close() covers Alt+F4 / window-X (all platforms) and ⌘W / red-button (macOS).
-// Behaviour is platform-dependent:
-//   - Linux: closeEvent explicitly quits (matches GNOME/KDE convention).
-//   - macOS/Windows: closeEvent hides to tray when the tray is available
-//     (Discord/Slack tray-app convention).
+// With a system tray, closeEvent hides the window; without one, it must quit
+// rather than leave a headless process running.
 if (process.platform === "linux") {
-  results.push(await runTest("Linux: Window.close() quits (Alt+F4 / X button convention)", async (child) => {
+  results.push(await runTest("Linux: Window.close() quits without a system tray", async (child) => {
     const inspector = new Inspector();
     await inspector.connect();
+    if (await trayIsAvailable(inspector)) {
+      inspector.disconnect();
+      return skipTest("system tray is available; close is expected to hide the window");
+    }
     const win = await findByObjectName(inspector, "logosMainWindow");
     if (!win) {
       inspector.disconnect();
