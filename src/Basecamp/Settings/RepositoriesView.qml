@@ -33,7 +33,7 @@ Item {
         property string pendingRemoveUrl: ""
     }
 
-    ScrollView {
+    LogosScrollView {
         id: scroll
         anchors.fill: parent
         anchors.margins: Theme.spacing.large
@@ -212,20 +212,14 @@ Item {
                             }
                         }
 
-                        TextEdit {
+                        LogosSelectableText {
                             visible: url.length > 0
                             Layout.fillWidth: true
                             text: url
                             font.pixelSize: Theme.typography.secondaryText
                             color: Theme.palette.textSecondary
                             wrapMode: TextEdit.WrapAnywhere
-                            readOnly: true
-                            selectByMouse: true
-                            selectByKeyboard: true
-                            selectionColor: Theme.palette.accentOrange
-                            activeFocusOnPress: true
                             persistentSelection: true
-                            textFormat: TextEdit.PlainText
                         }
 
                         LogosText {
@@ -268,8 +262,6 @@ Item {
 
                             LogosButton {
                                 text: qsTr("Remove")
-                                implicitWidth: 100
-                                implicitHeight: 32
                                 onClicked: {
                                     if (isDefault) {
                                         d.pendingRemoveUrl = url
@@ -299,7 +291,10 @@ Item {
         }
     }
 
-    // Confirmation dialog for removing the default repository.
+    // Confirmation for removing the default repository. Removal is a real
+    // delete — the row leaves the list and can only be brought back by
+    // pasting the exact URL into "Add a repository". Disable (toggle) is
+    // the reversible affordance.
     LogosWarningDialog {
         id: removeDefaultDialog
 
@@ -309,13 +304,13 @@ Item {
 
         message: qsTr("The default Logos repository provides the official package catalog. "
                       + "Copy the URL first if you want to restore it later — you can re-add it "
-                      + "by pasting it into the \"Add a repository\" field.")
+                      + "by pasting it into the \"Add a repository\" field. If you just want to "
+                      + "stop the default catalog from participating temporarily, disable it "
+                      + "with the toggle instead.")
 
         leftActions: [
             LogosButton {
                 text: qsTr("Cancel")
-                implicitWidth: 100
-                implicitHeight: 36
                 onClicked: {
                     d.pendingRemoveUrl = ""
                     removeDefaultDialog.close()
@@ -326,8 +321,7 @@ Item {
         rightActions: [
             LogosButton {
                 text: qsTr("Remove")
-                implicitWidth: 100
-                implicitHeight: 36
+                variant: LogosButton.Variant.Primary
                 onClicked: {
                     root.removeRequested(d.pendingRemoveUrl)
                     d.pendingRemoveUrl = ""

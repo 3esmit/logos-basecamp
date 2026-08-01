@@ -36,8 +36,11 @@ private:
     void setupUi();
     void createTrayIcon();
     void setIcon();
+    bool isWindowShown() const;
+    void restoreWindow();
 #ifdef Q_OS_MAC
     void setupMacOSDockReopen();
+    void createMenuBar();
 #endif
 
     LogosAPI* m_logosAPI;

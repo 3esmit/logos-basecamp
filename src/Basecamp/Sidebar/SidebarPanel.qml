@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 
+import Logos.Controls
 import Logos.Theme
 
 import Basecamp.Icons
@@ -17,7 +18,6 @@ Control {
     signal launchUIModule(string name)
     signal updateLauncherIndex(int index)
     signal tooltipRequested(string text, real y)
-    signal tooltipCleared()
 
     padding: 0
     bottomPadding: Theme.spacing.large
@@ -87,7 +87,6 @@ Control {
                     icon.source: modelData.icon
                     onClicked: root.updateLauncherIndex(index)
                     onTooltipRequested: (text, y) => root.tooltipRequested(text, y)
-                    onTooltipCleared: root.tooltipCleared()
                 }
             }
         }
@@ -133,7 +132,6 @@ Control {
                             hasMissingDeps: modelData.hasMissingDeps === true
                             onClicked: root.launchUIModule(modelData.name)
                             onTooltipRequested: (text, y) => root.tooltipRequested(text, y)
-                            onTooltipCleared: root.tooltipCleared()
                         }
                     }
 
@@ -158,7 +156,6 @@ Control {
                             hasMissingDeps: modelData.hasMissingDeps === true
                             onClicked: root.launchUIModule(modelData.name)
                             onTooltipRequested: (text, y) => root.tooltipRequested(text, y)
-                            onTooltipCleared: root.tooltipCleared()
                         }
                     }
                 }
@@ -179,24 +176,24 @@ Control {
                     icon.source: modelData.icon
                     onClicked: root.updateLauncherIndex(_d.workspaceSections.length + index)
                     onTooltipRequested: (text, y) => root.tooltipRequested(text, y)
-                    onTooltipCleared: root.tooltipCleared()
                 }
             }
         }
 
         // Version footer — falls back to the build-type label
-        // ("Dev build" / "Portable build")
-        Text {
+        // ("Dev build" / "Portable build"). Selectable so the release tag can
+        // be copied out of the sidebar.
+        LogosSelectableText {
             Layout.fillWidth: true
             Layout.alignment: Qt.AlignHCenter
-            horizontalAlignment: Text.AlignHCenter
+            horizontalAlignment: TextEdit.AlignHCenter
             text: backend.buildVersion.length > 0
                 ? backend.buildVersion
                 : (backend.isPortableBuild ? qsTr("Portable build")
                                            : qsTr("Dev build"))
             color: Theme.palette.textSecondary
             font.pixelSize: Theme.typography.badgeText
-            elide: Text.ElideRight
+            wrapMode: TextEdit.WrapAnywhere
         }
     }
 

@@ -7,6 +7,8 @@
 
 #include "restricted/DenyAllNAMFactory.h"
 #include "restricted/RestrictedUrlInterceptor.h"
+#include "restricted/SandboxLogging.h"
+#include "restricted/SharedLogosModules.h"
 
 namespace QmlSandbox {
 
@@ -14,7 +16,8 @@ QStringList configure(QQmlEngine* engine,
                       const QString& installDir,
                       const QString& qmlViewPath,
                       const QString& appLibDir,
-                      const QString& verifiedAssetProviderName)
+                      const QString& verifiedAssetProviderName,
+                      const QString& pluginLabel)
 {
     const QStringList qtDefaultPaths = engine->importPathList();
 
@@ -40,7 +43,7 @@ QStringList configure(QQmlEngine* engine,
     // get a native .so dlopen()ed into the host process. (Previously installDir
     // was prepended here, which — together with the module dir being on the
     // import path — let a qmldir 'plugin' directive load arbitrary native code.)
-    engine->setNetworkAccessManagerFactory(new DenyAllNAMFactory());
+    engine->setNetworkAccessManagerFactory(new DenyAllNAMFactory(pluginLabel));
 
     // allowedRoots gate ALL local file/qmldir resolution. untrustedRoots is the
     // subset (the module's own dirs) where a qmldir may not declare a native
@@ -57,12 +60,7 @@ QStringList configure(QQmlEngine* engine,
     }
     // Allow only an explicit set of shared Logos QML modules.
     if (!appLibDir.isEmpty()) {
-        static const QStringList kAllowedLogosModules = {
-            QStringLiteral("Theme"),
-            QStringLiteral("Controls"),
-            QStringLiteral("Icons"),
-        };
-        for (const QString& mod : kAllowedLogosModules) {
+        for (const QString& mod : kSharedLogosModules()) {
             const QString modDir = QDir(appLibDir + "/Logos/" + mod).canonicalPath();
             if (!modDir.isEmpty() && !allowedRoots.contains(modDir))
                 allowedRoots << modDir;
@@ -77,8 +75,24 @@ QStringList configure(QQmlEngine* engine,
         if (!canon.isEmpty() && !allowedRoots.contains(canon))
             allowedRoots << canon;
     }
-    engine->addUrlInterceptor(new RestrictedUrlInterceptor(
-        allowedRoots, untrustedRoots, verifiedAssetProviderName));
+    engine->addUrlInterceptor(
+        new RestrictedUrlInterceptor(
+            allowedRoots, untrustedRoots, verifiedAssetProviderName, pluginLabel));
+
+    // One-line summary so a post-mortem log always shows what the sandbox
+    // was configured with for this plugin (install/entry dirs, whether the
+    // vetted appLibDir is present). Individual block/redirect events are
+    // logged at Warning by the interceptor / DenyAllReply.
+    qCInfo(lcBasecampSandbox).noquote()
+        << QStringLiteral("Sandbox configured%1: install=\"%2\" entry=\"%3\" "
+                          "appLibDir=%4 untrustedRoots=%5")
+               .arg(pluginLabel.isEmpty()
+                        ? QString()
+                        : QStringLiteral(" for plugin=%1").arg(pluginLabel),
+                    installDir,
+                    qmlEntryDir,
+                    appLibDir.isEmpty() ? QStringLiteral("(none)") : appLibDir,
+                    QString::number(untrustedRoots.size()));
     return untrustedRoots;
 }
 

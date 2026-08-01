@@ -95,6 +95,13 @@ endif()
 message(STATUS "Using logos-cpp-sdk at: ${LOGOS_CPP_SDK_ROOT}")
 message(STATUS "logos-cpp-sdk layout: ${_cpp_sdk_is_source}")
 
+# Logos.Theme / .Icons / .Controls come from logos-design-system as STATIC
+# qt_add_qml_module targets exposed via the Logos::DesignSystem umbrella
+# INTERFACE library. Nix passes -DLogosDesignSystem_DIR=<store>/lib/cmake/
+# LogosDesignSystem so this find_package succeeds without polluting the
+# global CMAKE_PREFIX_PATH.
+find_package(LogosDesignSystem CONFIG REQUIRED)
+
 # Try to find the component-interfaces package first
 find_package(component-interfaces QUIET)
 
@@ -122,6 +129,7 @@ set(SOURCES
     CatalogResolution.cpp
     InstallRegistry.cpp
     AppsModel.cpp
+    ModuleInstanceModel.cpp
     PluginLoader.cpp
     WorkspaceArea.cpp
     ShortcutBridge.cpp
@@ -133,6 +141,7 @@ set(SOURCES
     restricted/UserSelectedFileBridge.cpp
     restricted/VerifiedAssetImageProvider.cpp
     restricted/VerifiedAssetProducerMetadata.cpp
+    restricted/SandboxLogging.cpp
 )
 
 # Add SDK sources based on layout type
@@ -222,6 +231,8 @@ qt_add_qml_module(basecamp_backend_qml
         InstallEnums.cpp
         AppsFilterProxy.h
         AppsFilterProxy.cpp
+        ModulesFilterProxy.h
+        ModulesFilterProxy.cpp
 )
 
 qt_add_qml_module(basecamp_common_qml
@@ -232,6 +243,7 @@ qt_add_qml_module(basecamp_common_qml
     OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/Basecamp/Common
     QML_FILES
         Basecamp/Common/LoadingOverlay.qml
+        Basecamp/Common/EmptyView.qml
 )
 
 qt_add_qml_module(basecamp_sidebar_qml
@@ -255,6 +267,8 @@ qt_add_qml_module(basecamp_appmanager_qml
     OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/Basecamp/AppManager
     QML_FILES
         Basecamp/AppManager/AppManagerView.qml
+        Basecamp/AppManager/AppManagerPanelHeader.qml
+        Basecamp/AppManager/AppRepoSection.qml
         Basecamp/AppManager/AppGrid.qml
         Basecamp/AppManager/AppGridDelegate.qml
         Basecamp/AppManager/AppListDelegate.qml
@@ -273,11 +287,12 @@ qt_add_qml_module(basecamp_settings_qml
     QML_FILES
         Basecamp/Settings/SettingsView.qml
         Basecamp/Settings/DashboardView.qml
-        Basecamp/Settings/ModulesView.qml
-        Basecamp/Settings/UiModulesTab.qml
-        Basecamp/Settings/CoreModulesView.qml
+        Basecamp/Settings/AppsInspectorView.qml
+        Basecamp/Settings/ModuleInspectorView.qml
+        Basecamp/Settings/InspectorPanelHeader.qml
+        Basecamp/Settings/ModuleStatusBadge.qml
+        Basecamp/Settings/ModuleRowActions.qml
         Basecamp/Settings/PluginInterfaceView.qml
-        Basecamp/Settings/ModuleRow.qml
         Basecamp/Settings/RepositoriesView.qml
 )
 
@@ -397,6 +412,7 @@ target_link_libraries(main_ui
         Qt6::QuickControls2
         component-interfaces
         ${LOGOS_VIEW_MODULE_RUNTIME_LIB}
+        Logos::DesignSystem
         basecamp_backend_qml
         basecamp_common_qml
         basecamp_sidebar_qml
