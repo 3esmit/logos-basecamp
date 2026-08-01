@@ -38,9 +38,10 @@ name: basecamp Doc-Tests
 #   https://<owner>.github.io/<repo>/                  links to the latest reports
 # instead of 404ing.
 #
-# Note: pull requests opened from forks get a read-only GITHUB_TOKEN, so the
-# Pages push and PR comment are skipped for them — the downloadable artifact is
-# still produced. PRs from branches in this repo get the full clickable links.
+# Note: pull requests from external repositories get a read-only GITHUB_TOKEN,
+# so the Pages push and PR comment are skipped for them — the downloadable
+# artifact is still produced. PRs from branches in this repository get the full
+# clickable links.
 # ──────────────────────────────────────────────────────────────────────────────
 
 on:
@@ -60,9 +61,12 @@ jobs:
   doctests:
     name: basecamp doc-tests (${{ matrix.os }})
     environment: ${{ github.ref == 'refs/heads/master' && 'public-cache' || '' }}
+    permissions:
+      contents: read
     env:
       ATTIC_AVAILABLE: >-
         ${{
+          github.event_name == 'push' &&
           secrets.ATTIC_ENDPOINT != '' &&
           (
             (github.ref == 'refs/heads/master' && secrets.ATTIC_TOKEN_PUBLIC != '') ||
@@ -80,6 +84,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@main
@@ -90,7 +96,7 @@ jobs:
             fallback = true
 
       - name: Setup Attic cache
-        if: env.ATTIC_AVAILABLE == 'true'
+        if: github.event_name == 'push' && env.ATTIC_AVAILABLE == 'true'
         uses: ryanccn/attic-action@v0.4.1
         with:
           endpoint: ${{ secrets.ATTIC_ENDPOINT }}
@@ -223,8 +229,10 @@ jobs:
     name: Publish report to GitHub Pages
     needs: doctests
     # Run even when tests fail — a failing run is exactly when you want to open
-    # the report. Skip on forks, where GITHUB_TOKEN can't push or comment.
-    if: ${{ always() && github.event.pull_request.head.repo.fork != true }}
+    # the report. Skip external forks, where GITHUB_TOKEN cannot push or comment.
+    # Compare repository identity rather than the `fork` flag: a repository may
+    # itself be a fork while still hosting trusted same-repository branches.
+    if: ${{ always() && (github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) }}
     runs-on: ubuntu-latest
 
     permissions:
