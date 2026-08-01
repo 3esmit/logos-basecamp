@@ -38,9 +38,10 @@ name: basecamp Doc-Tests
 #   https://<owner>.github.io/<repo>/                  links to the latest reports
 # instead of 404ing.
 #
-# Note: pull requests opened from forks get a read-only GITHUB_TOKEN, so the
-# Pages push and PR comment are skipped for them — the downloadable artifact is
-# still produced. PRs from branches in this repo get the full clickable links.
+# Note: pull requests from external repositories get a read-only GITHUB_TOKEN,
+# so the Pages push and PR comment are skipped for them — the downloadable
+# artifact is still produced. PRs from branches in this repository get the full
+# clickable links.
 # ──────────────────────────────────────────────────────────────────────────────
 
 on:
@@ -60,9 +61,12 @@ jobs:
   doctests:
     name: basecamp doc-tests (${{ matrix.os }})
     environment: ${{ github.ref == 'refs/heads/master' && 'public-cache' || '' }}
+    permissions:
+      contents: read
     env:
       ATTIC_AVAILABLE: >-
         ${{
+          github.event_name == 'push' &&
           secrets.ATTIC_ENDPOINT != '' &&
           (
             (github.ref == 'refs/heads/master' && secrets.ATTIC_TOKEN_PUBLIC != '') ||
@@ -80,6 +84,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@main
@@ -90,7 +96,7 @@ jobs:
             fallback = true
 
       - name: Setup Attic cache
-        if: env.ATTIC_AVAILABLE == 'true'
+        if: github.event_name == 'push' && env.ATTIC_AVAILABLE == 'true'
         uses: ryanccn/attic-action@v0.4.1
         with:
           endpoint: ${{ secrets.ATTIC_ENDPOINT }}
@@ -115,36 +121,44 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             libopengl0 libglx0 libgl1 libegl1 libglu1-mesa libvulkan1
 
-      # Resolve the commit under test. For pull requests this is the PR's head
-      # commit (not the synthetic merge commit); for pushes it's the pushed
-      # commit. Passed to --release-for below so the doc-test builds/launches THIS
-      # commit of logos-basecamp instead of the latest published flake.
-      #
-      # Fork PRs are the exception: their head commit lives in the fork, not in
-      # logos-co/logos-basecamp, so nix could not fetch
-      # `github:logos-co/logos-basecamp/<sha>`. We blank the SHA for forks
-      # (--release-for repo= → pins that repo to latest), so the doc-test still
-      # runs for fork PRs, just against master.
-      - name: Resolve commit under test
-        id: commit
+      # Resolve the exact source under test. A pull request can originate from a
+      # fork, so both repository and head SHA are needed: the specs' default URL
+      # points at logos-co/logos-basecamp, while the commit may live elsewhere.
+      # For pushes, this repository and the pushed SHA are the source.
+      - name: Resolve source under test
+        id: source
         shell: bash
         run: |
-          if [ "${{ github.event_name }}" = "pull_request" ] && \
-             [ "${{ github.event.pull_request.head.repo.fork }}" = "true" ]; then
-            echo "sha=" >> "$GITHUB_OUTPUT"
-            echo "Fork PR detected — doc-test will run against latest master."
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "repository=${{ github.event.pull_request.head.repo.full_name }}" >> "$GITHUB_OUTPUT"
+            echo "sha=${{ github.event.pull_request.head.sha }}" >> "$GITHUB_OUTPUT"
           else
-            echo "sha=${{ github.event.pull_request.head.sha || github.sha }}" >> "$GITHUB_OUTPUT"
+            echo "repository=${{ github.repository }}" >> "$GITHUB_OUTPUT"
+            echo "sha=${{ github.sha }}" >> "$GITHUB_OUTPUT"
           fi
+
+      # Materialize only build URLs in a temporary copy. Narrative links keep
+      # their canonical upstream target, while Nix builds the selected repository
+      # and exact commit for this run.
+      - name: Materialize doc-test source URLs
+        env:
+          BASECAMP_REPOSITORY: ${{ steps.source.outputs.repository }}
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/basecamp-doctests"
+          for spec in basecamp-modules basecamp-modules-bundle basecamp-crossversion-accounts basecamp-fullapi-ui basecamp-fullapi-ui-qml basecamp-shortcut-bridge; do
+            sed "s#github:logos-co/logos-basecamp{release}#github:${BASECAMP_REPOSITORY}{release}#g" \
+              "doctests/${spec}.test.yaml" \
+              > "$RUNNER_TEMP/basecamp-doctests/${spec}.test.yaml"
+          done
 
       # The runner is the shared `doctest` CLI, invoked directly via its flake
       # (github:logos-co/logos-doctest). The flake bundles Python + PyYAML
       # (+ rich), so no pip install step is needed.
       #
-      # --release-for pins the {release} placeholder for logos-basecamp to the
-      # commit under test, so `github:logos-co/logos-basecamp{release}` in the
-      # specs becomes `.../<sha>` — the doc-test builds and exercises this
-      # PR/push rather than master. Every other repo URL still resolves to latest.
+      # --release-for pins the {release} placeholder to the selected commit. The
+      # temporary specs above direct only Basecamp build URLs to the selected
+      # repository; every other repository URL still resolves normally.
       - name: Run basecamp doc-test
         run: |
           # --continue-on-fail so the run walks every step and the published
@@ -169,15 +183,15 @@ jobs:
           #     directly from QML via the `logos` bridge (logos.callModule /
           #     onModuleEvent), covering the QML-expressible surface.
           nix run github:logos-co/logos-doctest -- run \
-            doctests/basecamp-modules.test.yaml \
-            doctests/basecamp-modules-bundle.test.yaml \
-            doctests/basecamp-crossversion-accounts.test.yaml \
-            doctests/basecamp-fullapi-ui.test.yaml \
-            doctests/basecamp-fullapi-ui-qml.test.yaml \
-            doctests/basecamp-shortcut-bridge.test.yaml \
+            "$RUNNER_TEMP/basecamp-doctests/basecamp-modules.test.yaml" \
+            "$RUNNER_TEMP/basecamp-doctests/basecamp-modules-bundle.test.yaml" \
+            "$RUNNER_TEMP/basecamp-doctests/basecamp-crossversion-accounts.test.yaml" \
+            "$RUNNER_TEMP/basecamp-doctests/basecamp-fullapi-ui.test.yaml" \
+            "$RUNNER_TEMP/basecamp-doctests/basecamp-fullapi-ui-qml.test.yaml" \
+            "$RUNNER_TEMP/basecamp-doctests/basecamp-shortcut-bridge.test.yaml" \
             --verbose \
             --continue-on-fail \
-            --release-for logos-basecamp=${{ steps.commit.outputs.sha }} \
+            --release-for logos-basecamp=${{ steps.source.outputs.sha }} \
             --report "${{ runner.temp }}/basecamp-doctest-report.html"
 
       - name: Stage report for upload
@@ -204,8 +218,8 @@ jobs:
         run: |
           for spec in basecamp-modules basecamp-modules-bundle basecamp-crossversion-accounts basecamp-fullapi-ui basecamp-fullapi-ui-qml basecamp-shortcut-bridge; do
             nix run github:logos-co/logos-doctest -- generate \
-              "doctests/${spec}.test.yaml" \
-              --release-for logos-basecamp=${{ steps.commit.outputs.sha }} \
+              "${{ runner.temp }}/basecamp-doctests/${spec}.test.yaml" \
+              --release-for logos-basecamp=${{ steps.source.outputs.sha }} \
               -o "/tmp/${spec}.md"
             test -s "/tmp/${spec}.md"
             echo "Generated ${spec}.md successfully"
@@ -215,8 +229,10 @@ jobs:
     name: Publish report to GitHub Pages
     needs: doctests
     # Run even when tests fail — a failing run is exactly when you want to open
-    # the report. Skip on forks, where GITHUB_TOKEN can't push or comment.
-    if: ${{ always() && github.event.pull_request.head.repo.fork != true }}
+    # the report. Skip external forks, where GITHUB_TOKEN cannot push or comment.
+    # Compare repository identity rather than the `fork` flag: a repository may
+    # itself be a fork while still hosting trusted same-repository branches.
+    if: ${{ always() && (github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) }}
     runs-on: ubuntu-latest
 
     permissions:
