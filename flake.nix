@@ -35,7 +35,7 @@
     };
     nix-bundle-logos-module-install.url = "github:logos-co/nix-bundle-logos-module-install";
     nix-bundle-dir.url = "github:logos-co/nix-bundle-dir";
-    logos-qt-mcp.url = "github:logos-co/logos-qt-mcp";
+    logos-qt-mcp.url = "github:3esmit/logos-qt-mcp/9322f7fe4771e01f6ae5afa0c271c7d63db76eb9";
     nix-bundle-appimage.url = "github:logos-co/nix-bundle-appimage";
     nix-bundle-macos-app = {
       url = "github:logos-co/nix-bundle-macos-app";
