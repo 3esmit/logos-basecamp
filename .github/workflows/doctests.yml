@@ -115,36 +115,44 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             libopengl0 libglx0 libgl1 libegl1 libglu1-mesa libvulkan1
 
-      # Resolve the commit under test. For pull requests this is the PR's head
-      # commit (not the synthetic merge commit); for pushes it's the pushed
-      # commit. Passed to --release-for below so the doc-test builds/launches THIS
-      # commit of logos-basecamp instead of the latest published flake.
-      #
-      # Fork PRs are the exception: their head commit lives in the fork, not in
-      # logos-co/logos-basecamp, so nix could not fetch
-      # `github:logos-co/logos-basecamp/<sha>`. We blank the SHA for forks
-      # (--release-for repo= → pins that repo to latest), so the doc-test still
-      # runs for fork PRs, just against master.
-      - name: Resolve commit under test
-        id: commit
+      # Resolve the exact source under test. A pull request can originate from a
+      # fork, so both repository and head SHA are needed: the specs' default URL
+      # points at logos-co/logos-basecamp, while the commit may live elsewhere.
+      # For pushes, this repository and the pushed SHA are the source.
+      - name: Resolve source under test
+        id: source
         shell: bash
         run: |
-          if [ "${{ github.event_name }}" = "pull_request" ] && \
-             [ "${{ github.event.pull_request.head.repo.fork }}" = "true" ]; then
-            echo "sha=" >> "$GITHUB_OUTPUT"
-            echo "Fork PR detected — doc-test will run against latest master."
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "repository=${{ github.event.pull_request.head.repo.full_name }}" >> "$GITHUB_OUTPUT"
+            echo "sha=${{ github.event.pull_request.head.sha }}" >> "$GITHUB_OUTPUT"
           else
-            echo "sha=${{ github.event.pull_request.head.sha || github.sha }}" >> "$GITHUB_OUTPUT"
+            echo "repository=${{ github.repository }}" >> "$GITHUB_OUTPUT"
+            echo "sha=${{ github.sha }}" >> "$GITHUB_OUTPUT"
           fi
+
+      # Materialize only build URLs in a temporary copy. Narrative links keep
+      # their canonical upstream target, while Nix builds the selected repository
+      # and exact commit for this run.
+      - name: Materialize doc-test source URLs
+        env:
+          BASECAMP_REPOSITORY: ${{ steps.source.outputs.repository }}
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/basecamp-doctests"
+          for spec in basecamp-modules basecamp-modules-bundle basecamp-crossversion-accounts basecamp-fullapi-ui basecamp-fullapi-ui-qml basecamp-shortcut-bridge; do
+            sed "s#github:logos-co/logos-basecamp{release}#github:${BASECAMP_REPOSITORY}{release}#g" \
+              "doctests/${spec}.test.yaml" \
+              > "$RUNNER_TEMP/basecamp-doctests/${spec}.test.yaml"
+          done
 
       # The runner is the shared `doctest` CLI, invoked directly via its flake
       # (github:logos-co/logos-doctest). The flake bundles Python + PyYAML
       # (+ rich), so no pip install step is needed.
       #
-      # --release-for pins the {release} placeholder for logos-basecamp to the
-      # commit under test, so `github:logos-co/logos-basecamp{release}` in the
-      # specs becomes `.../<sha>` — the doc-test builds and exercises this
-      # PR/push rather than master. Every other repo URL still resolves to latest.
+      # --release-for pins the {release} placeholder to the selected commit. The
+      # temporary specs above direct only Basecamp build URLs to the selected
+      # repository; every other repository URL still resolves normally.
       - name: Run basecamp doc-test
         run: |
           # --continue-on-fail so the run walks every step and the published
@@ -169,15 +177,15 @@ jobs:
           #     directly from QML via the `logos` bridge (logos.callModule /
           #     onModuleEvent), covering the QML-expressible surface.
           nix run github:logos-co/logos-doctest -- run \
-            doctests/basecamp-modules.test.yaml \
-            doctests/basecamp-modules-bundle.test.yaml \
-            doctests/basecamp-crossversion-accounts.test.yaml \
-            doctests/basecamp-fullapi-ui.test.yaml \
-            doctests/basecamp-fullapi-ui-qml.test.yaml \
-            doctests/basecamp-shortcut-bridge.test.yaml \
+            "$RUNNER_TEMP/basecamp-doctests/basecamp-modules.test.yaml" \
+            "$RUNNER_TEMP/basecamp-doctests/basecamp-modules-bundle.test.yaml" \
+            "$RUNNER_TEMP/basecamp-doctests/basecamp-crossversion-accounts.test.yaml" \
+            "$RUNNER_TEMP/basecamp-doctests/basecamp-fullapi-ui.test.yaml" \
+            "$RUNNER_TEMP/basecamp-doctests/basecamp-fullapi-ui-qml.test.yaml" \
+            "$RUNNER_TEMP/basecamp-doctests/basecamp-shortcut-bridge.test.yaml" \
             --verbose \
             --continue-on-fail \
-            --release-for logos-basecamp=${{ steps.commit.outputs.sha }} \
+            --release-for logos-basecamp=${{ steps.source.outputs.sha }} \
             --report "${{ runner.temp }}/basecamp-doctest-report.html"
 
       - name: Stage report for upload
@@ -204,8 +212,8 @@ jobs:
         run: |
           for spec in basecamp-modules basecamp-modules-bundle basecamp-crossversion-accounts basecamp-fullapi-ui basecamp-fullapi-ui-qml basecamp-shortcut-bridge; do
             nix run github:logos-co/logos-doctest -- generate \
-              "doctests/${spec}.test.yaml" \
-              --release-for logos-basecamp=${{ steps.commit.outputs.sha }} \
+              "${{ runner.temp }}/basecamp-doctests/${spec}.test.yaml" \
+              --release-for logos-basecamp=${{ steps.source.outputs.sha }} \
               -o "/tmp/${spec}.md"
             test -s "/tmp/${spec}.md"
             echo "Generated ${spec}.md successfully"
