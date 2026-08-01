@@ -345,9 +345,34 @@ void AppsModel::mergeLocalOnlyInstalled(const QVariantList& installedPackages)
         // here would double-list them and clutter the section.
         if (pkg.value("installType").toString() != QLatin1String("user")) continue;
 
-        // Skip if any row for this name exists (catalog or previously merged
-        // local). markInstalled/setInstallType/setIconUrl already reach the
-        // existing row via m_indicesByName; nothing to do here.
+        // Refresh a synthetic Local row in place. Installed-package metadata
+        // is authoritative for rows without a catalog source, and can change
+        // when a locally installed package is upgraded while Basecamp stays
+        // open. Catalog-backed rows remain owned by replaceCatalog().
+        const auto localIt = m_indexByKey.constFind(key(QString(), name));
+        if (localIt != m_indexByKey.constEnd()) {
+            Row& r = m_rows[localIt.value()];
+            QList<int> changedRoles;
+            const auto update = [&changedRoles](QString& field,
+                                                const QString& value,
+                                                int role) {
+                if (field == value) return;
+                field = value;
+                changedRoles.append(role);
+            };
+            update(r.displayName, pkg.value("displayName").toString(), DisplayNameRole);
+            update(r.description, pkg.value("description").toString(), DescriptionRole);
+            update(r.category, pkg.value("category").toString(), CategoryRole);
+            update(r.type, pkg.value("type").toString(), TypeRole);
+            if (!changedRoles.isEmpty()) {
+                const QModelIndex mi = index(localIt.value());
+                emit dataChanged(mi, mi, changedRoles);
+                if (changedRoles.contains(CategoryRole)) categoriesTouched = true;
+            }
+            continue;
+        }
+
+        // Catalog-backed rows are updated by replaceCatalog().
         if (m_indicesByName.contains(name)) continue;
 
         const int idx = m_rows.size();

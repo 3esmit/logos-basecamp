@@ -18,6 +18,24 @@ Control {
     signal launchUIModule(string name)
     signal updateLauncherIndex(int index)
     signal tooltipRequested(string text, real y)
+    signal tooltipCleared()
+
+    // A hover-loss notification can arrive after a neighbouring delegate has
+    // requested its tooltip. Track the owner so a stale clear cannot hide the
+    // newer tooltip, while an actual gap between controls still clears it.
+    property var tooltipOwner: null
+
+    function requestTooltip(source, text, y) {
+        tooltipOwner = source
+        tooltipRequested(text, y)
+    }
+
+    function clearTooltip(source) {
+        if (tooltipOwner !== source)
+            return
+        tooltipOwner = null
+        tooltipCleared()
+    }
 
     padding: 0
     bottomPadding: Theme.spacing.large
@@ -86,7 +104,8 @@ Control {
                     text: modelData.name
                     icon.source: modelData.icon
                     onClicked: root.updateLauncherIndex(index)
-                    onTooltipRequested: (text, y) => root.tooltipRequested(text, y)
+                    onTooltipRequested: (source, text, y) => root.requestTooltip(source, text, y)
+                    onTooltipCleared: source => root.clearTooltip(source)
                 }
             }
         }
@@ -131,7 +150,8 @@ Control {
                             icon.source: modelData.iconPath
                             hasMissingDeps: modelData.hasMissingDeps === true
                             onClicked: root.launchUIModule(modelData.name)
-                            onTooltipRequested: (text, y) => root.tooltipRequested(text, y)
+                            onTooltipRequested: (source, text, y) => root.requestTooltip(source, text, y)
+                            onTooltipCleared: source => root.clearTooltip(source)
                         }
                     }
 
@@ -155,7 +175,8 @@ Control {
                             icon.source: modelData.iconPath
                             hasMissingDeps: modelData.hasMissingDeps === true
                             onClicked: root.launchUIModule(modelData.name)
-                            onTooltipRequested: (text, y) => root.tooltipRequested(text, y)
+                            onTooltipRequested: (source, text, y) => root.requestTooltip(source, text, y)
+                            onTooltipCleared: source => root.clearTooltip(source)
                         }
                     }
                 }
@@ -175,7 +196,8 @@ Control {
                     text: modelData.name
                     icon.source: modelData.icon
                     onClicked: root.updateLauncherIndex(_d.workspaceSections.length + index)
-                    onTooltipRequested: (text, y) => root.tooltipRequested(text, y)
+                    onTooltipRequested: (source, text, y) => root.requestTooltip(source, text, y)
+                    onTooltipCleared: source => root.clearTooltip(source)
                 }
             }
         }

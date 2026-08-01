@@ -166,9 +166,9 @@ void ShortcutBridge::onQmlShortcutEnabledChanged()
     QObject* qml = sender();
     if (!qml) return;
     const bool enabled = qml->property("enabled").toBool();
-    for (auto it = m_qmlToMirrors.constFind(qml);
-         it != m_qmlToMirrors.constEnd() && it.key() == qml; ++it) {
-        if (QShortcut* m = it.value()) m->setEnabled(enabled);
+    const auto mirrors = m_qmlToMirrors.values(qml);
+    for (const QPointer<QShortcut>& mirror : mirrors) {
+        if (mirror) mirror->setEnabled(enabled);
     }
 }
 

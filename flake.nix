@@ -283,7 +283,7 @@
           # the test plan phases land to make it a gate.
           # Build: nix build .#coverage -L && open result/coverage.html
           coverage = import ./nix/coverage.nix {
-            inherit pkgs src logosPackageHeaders;
+            inherit pkgs src logosPackageHeaders logosProtocolPkg logosQtSdk;
             failUnderLine = 0;
           };
 

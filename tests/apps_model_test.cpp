@@ -1081,6 +1081,35 @@ private slots:
         QCOMPARE(model.rowCount(), 1);
     }
 
+    void mergeLocalOnly_refreshes_existing_local_metadata()
+    {
+        AppsModel model;
+        QVariantMap initial = makeInstalledPackage("orphan_mod", "1.0", "H1", "tools");
+        initial.insert("displayName", "Original name");
+        initial.insert("description", "Original description");
+        initial.insert("type", "ui_qml");
+        model.mergeLocalOnlyInstalled({initial});
+        QCOMPARE(model.rowCount(), 1);
+
+        QSignalSpy dataChangedSpy(&model, &AppsModel::dataChanged);
+        QVariantMap upgraded = makeInstalledPackage("orphan_mod", "2.0", "H2", "wallet");
+        upgraded.insert("displayName", "Updated name");
+        upgraded.insert("description", "Updated description");
+        upgraded.insert("type", "core");
+        model.mergeLocalOnlyInstalled({upgraded});
+
+        const QModelIndex idx = model.index(0);
+        QCOMPARE(model.data(idx, AppsModel::DisplayNameRole).toString(),
+                 QStringLiteral("Updated name"));
+        QCOMPARE(model.data(idx, AppsModel::DescriptionRole).toString(),
+                 QStringLiteral("Updated description"));
+        QCOMPARE(model.data(idx, AppsModel::CategoryRole).toString(),
+                 QStringLiteral("wallet"));
+        QCOMPARE(model.data(idx, AppsModel::TypeRole).toString(),
+                 QStringLiteral("core"));
+        QCOMPARE(dataChangedSpy.count(), 1);
+    }
+
     // ── Regression: uninstalling a local-only module removes its row ────
     //
     // Bug: mergeLocalOnlyInstalled is called by PackageCoordinator after

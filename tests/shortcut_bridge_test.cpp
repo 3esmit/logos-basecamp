@@ -283,6 +283,41 @@ private slots:
         QCOMPARE(mirrorCount(&host), 2);
     }
 
+    void multiSequenceMirrorsTrackEnabledState()
+    {
+        QWidget host;
+        auto* layout = new QVBoxLayout(&host);
+        auto* stack = new QStackedWidget(&host);
+        layout->addWidget(stack);
+
+        auto* pane = makePane(
+            "import QtQuick 2.15\n"
+            "Item {\n"
+            "  Shortcut { objectName: \"sc\"; sequences: [\"Ctrl+K\", \"Ctrl+L\"] }\n"
+            "}\n",
+            stack);
+        stack->addWidget(pane);
+        host.show();
+        pump();
+
+        ShortcutBridge bridge(&host, stack);
+        pump();
+
+        const auto mirrors = host.findChildren<QShortcut*>();
+        QCOMPARE(mirrors.size(), 2);
+        for (QShortcut* mirror : mirrors) QVERIFY(mirror->isEnabled());
+
+        QObject* qml = findShortcutByObjectName(pane, "sc");
+        QVERIFY(qml);
+        qml->setProperty("enabled", false);
+        pump();
+        for (QShortcut* mirror : mirrors) QVERIFY(!mirror->isEnabled());
+
+        qml->setProperty("enabled", true);
+        pump();
+        for (QShortcut* mirror : mirrors) QVERIFY(mirror->isEnabled());
+    }
+
     // -----------------------------------------------------------------
     // Pane switching
     // -----------------------------------------------------------------

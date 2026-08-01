@@ -16,7 +16,7 @@
 # .gcno and therefore do NOT appear in the report as 0% — the percentage here
 # is "coverage of the code under unit test", not of all of src/. Adding a
 # source to tests/CMakeLists.txt is what pulls it into the denominator.
-{ pkgs, src, logosPackageHeaders, failUnderLine ? 0, failUnderBranch ? 0 }:
+{ pkgs, src, logosPackageHeaders, logosProtocolPkg, logosQtSdk, failUnderLine ? 0, failUnderBranch ? 0 }:
 
 let
   # gcov reader matching the stdenv compiler: clang emits gcov data only
@@ -43,6 +43,9 @@ pkgs.stdenv.mkDerivation {
   buildInputs = [
     pkgs.qt6.qtbase
     pkgs.qt6.qtdeclarative   # Qt::Qml — InstallEnums.h includes <QtQml/qqml.h>
+    pkgs.qt6.qtremoteobjects # logos-protocol CMake package requires Qt::RemoteObjects
+    logosProtocolPkg
+    logosQtSdk
   ];
 
   dontUseCmakeConfigure = true;
@@ -53,6 +56,8 @@ pkgs.stdenv.mkDerivation {
     # threads; Debug already implies -O0 -g, which keeps line mapping exact.
     cmake -S tests -B build-cov -GNinja -DCMAKE_BUILD_TYPE=Debug \
       -DLOGOS_PACKAGE_HEADERS="${logosPackageHeaders}/include" \
+      -DLOGOS_PROTOCOL_ROOT="${logosProtocolPkg}" \
+      -DLOGOS_QT_SDK_ROOT="${logosQtSdk}" \
       -DCMAKE_CXX_FLAGS="--coverage -fprofile-update=atomic" \
       -DCMAKE_EXE_LINKER_FLAGS="--coverage"
     cmake --build build-cov

@@ -47,9 +47,11 @@ private slots:
     // receive clicks), intercepting when one is.
     void onOverlayActiveChanged(bool active);
     void onSidebarTooltipRequested(const QString& text, qreal y);
+    void onSidebarTooltipCleared();
 
 private:
     void setupUi();
+    void clearSidebarTooltip();
 
     // Main layout
     QHBoxLayout* m_mainLayout;
@@ -84,4 +86,3 @@ private:
     LogosAPI* m_logosAPI;
     ShortcutBridge* m_shortcutBridge = nullptr;
 };
-
