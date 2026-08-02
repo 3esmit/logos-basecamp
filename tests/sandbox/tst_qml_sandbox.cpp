@@ -844,6 +844,23 @@ private slots:
         QVERIFY(!roots.at(0).endsWith(QStringLiteral("/palace_core/instance-b")));
         QVERIFY(!roots.at(0).contains(QStringLiteral("unrelated_core")));
 
+        const QString profileRoot = moduleDataDir.path()
+            + QStringLiteral("/palace_core/instance-a/palace-profiles/local-development");
+        QVERIFY(QDir().mkpath(profileRoot));
+        const QStringList profileRoots =
+            VerifiedAssetImageProvider::producerPersistenceRoots(
+                QStringLiteral("logos_palace_ui"),
+                {QStringLiteral("palace_core")},
+                moduleDataDir.path(),
+                QStringLiteral("palace-profiles/local-development"));
+        QCOMPARE(profileRoots, QStringList{profileRoot});
+        QVERIFY(VerifiedAssetImageProvider::producerPersistenceRoots(
+                    QStringLiteral("logos_palace_ui"),
+                    {QStringLiteral("palace_core")},
+                    moduleDataDir.path(),
+                    QStringLiteral("palace-profiles/../release"))
+                    .isEmpty());
+
         QVERIFY(QDir().mkpath(
             moduleDataDir.path() + QStringLiteral("/actual_core/instance-c")));
         const QString declaredAlias =
@@ -875,42 +892,177 @@ private slots:
                  "invalid active instance fell through to a later instance");
     }
 
+    void verifiedAssetProviderLoadsProfileScopedAsset()
+    {
+        QTemporaryDir moduleDataDir(
+            workRoot() + QStringLiteral("/tst_verified_profile_asset-XXXXXX"));
+        QVERIFY(moduleDataDir.isValid());
+        const QString profileRoot = moduleDataDir.path()
+            + QStringLiteral("/palace_core/instance-a/palace-profiles/local-development");
+        const QString profileAssetDir = profileRoot
+            + QStringLiteral("/verified_assets/logos_palace_ui");
+        QVERIFY(QDir().mkpath(profileAssetDir));
+
+        const QByteArray greenPng = encodedImage(
+            QSize(2, 1), QImage::Format_RGBA8888, QColor(Qt::green), "PNG");
+        QVERIFY2(!greenPng.isEmpty(), "failed to create profile PNG fixture");
+        const QString greenDigest = QString::fromLatin1(
+            QCryptographicHash::hash(greenPng, QCryptographicHash::Sha256).toHex());
+        writeBytes(profileAssetDir + QLatin1Char('/') + greenDigest
+                       + QStringLiteral(".png"),
+                   greenPng);
+
+        const QString directAssetDir = moduleDataDir.path()
+            + QStringLiteral("/palace_core/instance-a/verified_assets/logos_palace_ui");
+        QVERIFY(QDir().mkpath(directAssetDir));
+        const QByteArray redPng = encodedImage(
+            QSize(2, 1), QImage::Format_RGBA8888, QColor(Qt::red), "PNG");
+        QVERIFY2(!redPng.isEmpty(), "failed to create direct PNG fixture");
+        const QString redDigest = QString::fromLatin1(
+            QCryptographicHash::hash(redPng, QCryptographicHash::Sha256).toHex());
+        writeBytes(directAssetDir + QLatin1Char('/') + redDigest
+                       + QStringLiteral(".png"),
+                   redPng);
+
+        const QStringList roots = VerifiedAssetImageProvider::producerPersistenceRoots(
+            QStringLiteral("logos_palace_ui"),
+            {QStringLiteral("palace_core")},
+            moduleDataDir.path(),
+            QStringLiteral("palace-profiles/local-development"));
+        QCOMPARE(roots, QStringList{profileRoot});
+        VerifiedAssetImageProvider provider(QStringLiteral("logos_palace_ui"), roots);
+        QSize decodedSize;
+        const QImage image = provider.requestImage(greenDigest, &decodedSize, {});
+        QVERIFY(!image.isNull());
+        QCOMPARE(decodedSize, QSize(2, 1));
+        QCOMPARE(image.pixelColor(0, 0), QColor(Qt::green));
+        QVERIFY(provider.requestImage(redDigest, nullptr, {}).isNull());
+    }
+
     void verifiedAssetProducerMetadataRecoversInstalledVariantDeclaration()
     {
         QTemporaryDir installDir(
             workRoot() + QStringLiteral("/tst_verified_metadata-XXXXXX"));
         QVERIFY(installDir.isValid());
+        const QByteArray previousProfile = qgetenv("PALACE_TEST_ASSET_PROFILE");
+        qputenv("PALACE_TEST_ASSET_PROFILE", "local-development");
         writeFile(
             installDir.path() + QStringLiteral("/metadata.json"),
-            QStringLiteral(R"({"verified_asset_producers":["palace_core"]})"));
+            QStringLiteral(
+                R"({"verified_asset_producers":["palace_core"],"verified_asset_profile":{"directory":"palace-profiles","environment":"PALACE_TEST_ASSET_PROFILE","default":"release","allowed_profiles":["release","local-development"]}})"));
 
         const QVariantMap packageMetadata{
             {QStringLiteral("installDir"), installDir.path()}};
         const QVariantList directDependencies{QStringLiteral("palace_core")};
         QStringList producers;
         QString error;
+        QString profileRelativeRoot;
         QVERIFY2(VerifiedAssetProducerMetadata::resolve(
-                     packageMetadata, directDependencies, &producers, &error),
+                     packageMetadata,
+                     directDependencies,
+                     &producers,
+                     &error,
+                     &profileRelativeRoot),
                  qPrintable(error));
         QCOMPARE(producers, QStringList{QStringLiteral("palace_core")});
+        QCOMPARE(profileRelativeRoot,
+                 QStringLiteral("palace-profiles/local-development"));
 
         QVariantMap ipcMetadata = packageMetadata;
         ipcMetadata.insert(
             QStringLiteral("verified_asset_producers"),
             QVariantList{QStringLiteral("palace_core")});
         writeFile(installDir.path() + QStringLiteral("/metadata.json"),
-                  QStringLiteral(R"({"verified_asset_producers":"invalid"})"));
+                  QStringLiteral(
+                      R"({"verified_asset_producers":"invalid","verified_asset_profile":{"directory":"palace-profiles","environment":"PALACE_TEST_ASSET_PROFILE","default":"release","allowed_profiles":["release","local-development"]}})"));
         QVERIFY2(VerifiedAssetProducerMetadata::resolve(
-                     ipcMetadata, directDependencies, &producers, &error),
+                     ipcMetadata,
+                     directDependencies,
+                     &producers,
+                     &error,
+                     &profileRelativeRoot),
                  qPrintable(error));
         QCOMPARE(producers, QStringList{QStringLiteral("palace_core")});
+        QCOMPARE(profileRelativeRoot,
+                 QStringLiteral("palace-profiles/local-development"));
 
         writeFile(installDir.path() + QStringLiteral("/metadata.json"),
                   QStringLiteral(R"({"name":"no-capability-ui"})"));
         QVERIFY2(VerifiedAssetProducerMetadata::resolve(
-                     packageMetadata, directDependencies, &producers, &error),
+                     packageMetadata,
+                     directDependencies,
+                     &producers,
+                     &error,
+                     &profileRelativeRoot),
                  qPrintable(error));
         QVERIFY(producers.isEmpty());
+        QVERIFY(profileRelativeRoot.isEmpty());
+        if (previousProfile.isEmpty())
+            qunsetenv("PALACE_TEST_ASSET_PROFILE");
+        else
+            qputenv("PALACE_TEST_ASSET_PROFILE", previousProfile);
+    }
+
+    void verifiedAssetProducerMetadataRejectsInvalidProfileDeclarations()
+    {
+        const QVariantList directDependencies{QStringLiteral("palace_core")};
+        QVariantMap packageMetadata{
+            {QStringLiteral("verified_asset_producers"),
+             QVariantList{QStringLiteral("palace_core")}},
+        };
+        QStringList producers;
+        QString error;
+        QString profileRelativeRoot;
+
+        packageMetadata.insert(QStringLiteral("verified_asset_profile"),
+                               QStringLiteral("invalid"));
+        QVERIFY(!VerifiedAssetProducerMetadata::resolve(
+            packageMetadata,
+            directDependencies,
+            &producers,
+            &error,
+            &profileRelativeRoot));
+        QVERIFY(error.contains(QStringLiteral("must be an object")));
+
+        packageMetadata.insert(
+            QStringLiteral("verified_asset_profile"),
+            QVariantMap{
+                {QStringLiteral("directory"), QStringLiteral("../escape")},
+                {QStringLiteral("environment"), QStringLiteral("PALACE_TEST_ASSET_PROFILE")},
+                {QStringLiteral("default"), QStringLiteral("release")},
+                {QStringLiteral("allowed_profiles"),
+                 QVariantList{QStringLiteral("release")}},
+            });
+        QVERIFY(!VerifiedAssetProducerMetadata::resolve(
+            packageMetadata,
+            directDependencies,
+            &producers,
+            &error,
+            &profileRelativeRoot));
+        QVERIFY(error.contains(QStringLiteral("unsafe path or environment")));
+
+        const QByteArray previousProfile = qgetenv("PALACE_TEST_ASSET_PROFILE");
+        qputenv("PALACE_TEST_ASSET_PROFILE", "local-development");
+        packageMetadata.insert(
+            QStringLiteral("verified_asset_profile"),
+            QVariantMap{
+                {QStringLiteral("directory"), QStringLiteral("palace-profiles")},
+                {QStringLiteral("environment"), QStringLiteral("PALACE_TEST_ASSET_PROFILE")},
+                {QStringLiteral("default"), QStringLiteral("release")},
+                {QStringLiteral("allowed_profiles"),
+                 QVariantList{QStringLiteral("release")}},
+            });
+        QVERIFY(!VerifiedAssetProducerMetadata::resolve(
+            packageMetadata,
+            directDependencies,
+            &producers,
+            &error,
+            &profileRelativeRoot));
+        QVERIFY(error.contains(QStringLiteral("not allowed")));
+        if (previousProfile.isEmpty())
+            qunsetenv("PALACE_TEST_ASSET_PROFILE");
+        else
+            qputenv("PALACE_TEST_ASSET_PROFILE", previousProfile);
     }
 
     void verifiedAssetProducerMetadataRejectsInvalidDeclarations()

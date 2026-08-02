@@ -10,11 +10,16 @@
 // root manifest, so an absent field is recovered from the installed variant's
 // metadata.json. The recovered declaration still has to name direct core
 // dependencies before any persistence roots are exposed to QML.
+//
+// A declaration may optionally include `verified_asset_profile`. Its
+// validated result is a two-segment relative root below each declared
+// producer instance; an empty result preserves direct-root behavior.
 namespace VerifiedAssetProducerMetadata {
 
 bool resolve(const QVariantMap& packageMetadata,
              const QVariantList& directDependencies,
              QStringList* producers,
-             QString* error);
+             QString* error,
+             QString* profileRelativeRoot = nullptr);
 
 } // namespace VerifiedAssetProducerMetadata

@@ -36,10 +36,13 @@ public:
                                              QString* error);
 
     // Resolves only existing persistence directories belonging to the named
-    // producer modules. `moduleDataRoot` is injectable for tests.
+    // producer modules. When `profileRelativeRoot` is set, it must be a
+    // validated two-segment path below the active producer instance and only
+    // that profile root is exposed. `moduleDataRoot` is injectable for tests.
     static QStringList producerPersistenceRoots(const QString& appName,
                                                 const QStringList& producers,
-                                                const QString& moduleDataRoot = {});
+                                                const QString& moduleDataRoot = {},
+                                                const QString& profileRelativeRoot = {});
 
     QImage requestImage(const QString& id, QSize* size,
                         const QSize& requestedSize) override;

@@ -38,6 +38,18 @@ bool isDigest(const QString& id)
     return expression.match(id).hasMatch();
 }
 
+bool isSafeProfileRelativeRoot(const QString& path)
+{
+    const QStringList segments = path.split(QLatin1Char('/'), Qt::KeepEmptyParts);
+    if (segments.size() != 2)
+        return false;
+    for (const QString& segment : segments) {
+        if (!isSafeAppName(segment))
+            return false;
+    }
+    return QDir::cleanPath(path) == path;
+}
+
 bool isUnder(const QString& path, const QString& root)
 {
     return !path.isEmpty()
@@ -126,10 +138,14 @@ bool VerifiedAssetImageProvider::validateProducerDeclarations(
 QStringList VerifiedAssetImageProvider::producerPersistenceRoots(
     const QString& appName,
     const QStringList& producers,
-    const QString& moduleDataRoot)
+    const QString& moduleDataRoot,
+    const QString& profileRelativeRoot)
 {
-    if (!isSafeAppName(appName))
+    if (!isSafeAppName(appName)
+        || (!profileRelativeRoot.isEmpty()
+            && !isSafeProfileRelativeRoot(profileRelativeRoot))) {
         return {};
+    }
 
     const QString requestedBase = moduleDataRoot.isEmpty()
         ? LogosBasecampPaths::moduleDataDirectory()
@@ -165,12 +181,24 @@ QStringList VerifiedAssetImageProvider::producerPersistenceRoots(
         // asset capabilities.
         const QFileInfo& instance = instances.constFirst();
         const QString canonicalInstance = instance.canonicalFilePath();
-        if (instance.isDir() && !instance.isSymLink()
-            && canonicalInstance == QDir::cleanPath(instance.absoluteFilePath())
-            && isUnder(canonicalInstance, canonicalProducer)
-            && !seen.contains(canonicalInstance)) {
-            seen.insert(canonicalInstance);
-            roots.append(canonicalInstance);
+        if (!instance.isDir() || instance.isSymLink()
+            || canonicalInstance != QDir::cleanPath(instance.absoluteFilePath())
+            || !isUnder(canonicalInstance, canonicalProducer)) {
+            continue;
+        }
+
+        const QString expectedRoot = profileRelativeRoot.isEmpty()
+            ? canonicalInstance
+            : QDir::cleanPath(
+                  canonicalInstance + QLatin1Char('/') + profileRelativeRoot);
+        const QFileInfo rootInfo(expectedRoot);
+        const QString canonicalRoot = rootInfo.canonicalFilePath();
+        if (rootInfo.isDir() && !rootInfo.isSymLink()
+            && canonicalRoot == expectedRoot
+            && isUnder(canonicalRoot, canonicalInstance)
+            && !seen.contains(canonicalRoot)) {
+            seen.insert(canonicalRoot);
+            roots.append(canonicalRoot);
         }
     }
     return roots;
