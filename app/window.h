@@ -21,6 +21,11 @@ public:
     explicit Window(LogosAPI* logosAPI, QWidget *parent = nullptr);
     ~Window();
 
+    // Used by the headless release smoke check. The main UI is supplied by a
+    // runtime plugin, so inspect its named top-level QML views through the
+    // widget tree rather than coupling this executable to plugin classes.
+    bool mainUiStartupReady() const;
+
 protected:
     void changeEvent(QEvent *event) override;
     void closeEvent(QCloseEvent *event) override;

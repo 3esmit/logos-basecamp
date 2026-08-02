@@ -1,17 +1,7 @@
 # Smoke-tests the logos-basecamp binary.
-# A pure boot heartbeat: launches the app with -platform offscreen and fails if:
-#   - the app crashes before the timeout (non-zero exit that isn't timeout's 124)
-#   - the app exits too quickly with code 0 (indicates it didn't start properly)
-#
-# Deliberately does NOT scan the log for error patterns — QML/plugin error
-# assertions belong in integration-test (real UI walk with behavioural
-# assertions) and unit-tests, not in a boot heartbeat. Log-regex was fragile
-# (missed real bugs that never emitted the exact string, and tripped on any
-# stderr line matching the pattern from unrelated code paths like graceful
-# shutdown teardown noise).
-#
-# If the app crashes it exits immediately — the timeout is only ever waited out
-# on the happy path (app stays alive and healthy).
+# Launches the app with -platform offscreen and asks it to check its named
+# top-level QML views. This avoids fragile log matching while still rejecting
+# a running process whose shell QML failed to load.
 #
 # The LogosBasecamp launcher (bin/LogosBasecamp) bakes in the correct
 # QT_PLUGIN_PATH and LD_LIBRARY_PATH at build time for dev builds.
@@ -42,27 +32,23 @@ pkgs.runCommand "logos-basecamp-smoke-test" {
 
   LOG="$out/smoke-test.log"
 
-  echo "Running logos-basecamp smoke test (timeout: ${toString timeoutSec}s)..."
+  echo "Running logos-basecamp QML smoke test (timeout: ${toString timeoutSec}s)..."
   set +e
-  START=$(date +%s)
-  timeout ${toString timeoutSec} ${appBin} -platform offscreen > "$LOG" 2>&1
+  timeout ${toString timeoutSec} ${appBin} --smoke-check -platform offscreen > "$LOG" 2>&1
   CODE=$?
-  END=$(date +%s)
   set -e
 
   cat "$LOG"
 
-  # timeout returns 124 when it kills the process (expected — app runs an event loop)
-  if [ "$CODE" -ne 0 ] && [ "$CODE" -ne 124 ]; then
-    echo "App crashed with exit code $CODE"
+  if [ "$CODE" -ne 0 ]; then
+    echo "Basecamp QML smoke check failed with exit code $CODE"
     exit 1
   fi
 
-  ELAPSED=$(( END - START ))
-  if [ "$CODE" -eq 0 ] && [ "$ELAPSED" -lt 2 ]; then
-    echo "App exited too quickly (''${ELAPSED}s) — likely failed to start"
+  if ! grep -Fq "Basecamp QML smoke check passed." "$LOG"; then
+    echo "Basecamp did not report successful QML startup"
     exit 1
   fi
 
-  echo "Smoke test passed (exit code: $CODE, elapsed: ''${ELAPSED}s)"
+  echo "Basecamp QML smoke test passed"
 ''

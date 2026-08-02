@@ -206,6 +206,11 @@ signals:
                                           const QString& releaseTag,
                                           const QVariantList& depChanges);
 
+    // package_manager_ui performs the approved copy itself. Ask its already
+    // mounted view to refresh after Basecamp's fallback metadata rescan, so a
+    // QML-only local package is visible in both surfaces without user reload.
+    void packageManagerUiRefreshRequested();
+
     // Multi-uninstall cascade dialog trigger. `names` is the full batch of
     // packages being uninstalled. `installedDependents` is the union of each
     // name's recursive reverse dependents minus the names already in the batch
@@ -281,6 +286,12 @@ private:
     // seeds the installType cache for the UI-plugin subset; the full-scan pass
     // in refreshDependencyInfo overwrites it with the core-inclusive version.
     void fetchUiPluginMetadata();
+
+    // The package-manager UI owns the physical copy after an approved local
+    // install. QML-only packages do not reliably emit uiPluginFileInstalled,
+    // so poll the authoritative installed-package list for a bounded period
+    // before refreshing both Basecamp and the mounted package-manager view.
+    void refreshApprovedInstallUi(const QString& name, int attemptsRemaining);
 
     void tryFetchCatalog(const QHash<QString, QString>& installedByName, int retriesLeft);
     void buildCatalogIndexes(const QVariantList& catalog);

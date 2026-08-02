@@ -18,6 +18,7 @@
 #include <QPointer>
 #include <QTimer>
 
+#include <algorithm>
 #include <memory>
 
 #include "logos_sdk.h"
@@ -593,9 +594,21 @@ void PackageCoordinator::confirmInstallGate(const QString& name)
     QPointer<PackageCoordinator> self(this);
     logos.package_manager.confirmInstallAsync(name, [self, name](QVariantMap result) {
         if (!self) return;
-        if (!result.value("success", false).toBool())
+        if (!result.value("success", false).toBool()) {
             qWarning() << "confirmInstallGate rejected for" << name << ":"
                        << result.value("error").toString();
+            return;
+        }
+
+        // package_manager_ui performs the actual file copy after the gate is
+        // approved. QML-only local packages may not produce
+        // uiPluginFileInstalled, so wait for the authoritative package list
+        // instead of assuming a fixed copy duration. Normal install events
+        // can still refresh sooner.
+        QTimer::singleShot(0, self, [self, name]() {
+            if (!self) return;
+            self->refreshApprovedInstallUi(name, 40);
+        });
     });
 }
 
@@ -778,6 +791,36 @@ void PackageCoordinator::fetchUiPluginMetadata()
 
         // Kick off the App-Manager catalog fetch.
         self->tryFetchCatalog(installedByName, /*retriesLeft=*/10);
+    });
+}
+
+void PackageCoordinator::refreshApprovedInstallUi(const QString& name, int attemptsRemaining)
+{
+    if (!m_logosAPI || name.isEmpty() || attemptsRemaining <= 0) return;
+
+    LogosModules logos(m_logosAPI);
+    QPointer<PackageCoordinator> self(this);
+    logos.package_manager.getInstalledPackagesAsync(
+        [self, name, attemptsRemaining](QVariantList packages) {
+        if (!self) return;
+
+        const bool installed = std::any_of(
+            packages.cbegin(), packages.cend(), [&name](const QVariant& value) {
+                const QVariantMap package = value.toMap();
+                return package.value("name").toString() == name
+                    || package.value("moduleName").toString() == name;
+            });
+        if (installed) {
+            self->refresh();
+            emit self->packageManagerUiRefreshRequested();
+            return;
+        }
+
+        constexpr int retryDelayMs = 250;
+        QTimer::singleShot(retryDelayMs, self, [self, name, attemptsRemaining]() {
+            if (!self) return;
+            self->refreshApprovedInstallUi(name, attemptsRemaining - 1);
+        });
     });
 }
 

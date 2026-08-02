@@ -127,6 +127,8 @@ MainContainer::MainContainer(LogosAPI* logosAPI, QWidget* parent)
             this, &MainContainer::onPluginWindowRemoveRequested);
     connect(m_backend, &MainUIBackend::pluginWindowActivateRequested,
             this, &MainContainer::onPluginWindowActivateRequested);
+    connect(m_backend, &MainUIBackend::packageManagerUiRefreshRequested,
+            this, &MainContainer::onPackageManagerUiRefreshRequested);
 
     // When user closes a plugin tab (× button), notify backend to unload.
     connect(m_workspaceArea, &WorkspaceArea::pluginClosed,
@@ -192,6 +194,7 @@ void MainContainer::setupUi()
 
     // === SIDEBAR (QML) ===
     m_sidebarWidget = new QQuickWidget(this);
+    m_sidebarWidget->setObjectName(QStringLiteral("basecamp.qml.sidebar"));
     m_sidebarWidget->setResizeMode(QQuickWidget::SizeRootObjectToView);
     applyDevQmlImportPath(m_sidebarWidget->engine());
     m_sidebarWidget->rootContext()->setContextProperty("backend", m_backend);
@@ -218,6 +221,7 @@ void MainContainer::setupUi()
     
     // Index 1: QML content views (Dashboard, Modules, PackageManager, Settings)
     m_contentWidget = new QQuickWidget(m_contentStack);
+    m_contentWidget->setObjectName(QStringLiteral("basecamp.qml.content"));
     m_contentWidget->setResizeMode(QQuickWidget::SizeRootObjectToView);
     m_contentWidget->setClearColor(bgColor);
     applyDevQmlImportPath(m_contentWidget->engine());
@@ -257,6 +261,7 @@ void MainContainer::setupUi()
     // want it to float across the whole window, overlapping sidebar +
     // content. resizeEvent keeps its geometry in sync with the parent.
     m_overlayWidget = new QQuickWidget(this);
+    m_overlayWidget->setObjectName(QStringLiteral("basecamp.qml.overlay"));
     m_overlayWidget->setResizeMode(QQuickWidget::SizeRootObjectToView);
     // Transparent clear so the sidebar + content stay visible through
     // the overlay. The dialog itself paints its own opaque background.
@@ -405,4 +410,20 @@ void MainContainer::onPluginWindowActivateRequested(QWidget* widget)
     if (widget && widget == m_pmuiWidget) return;
     if (m_workspaceArea && widget)
         m_workspaceArea->activatePluginDock(widget);
+}
+
+void MainContainer::onPackageManagerUiRefreshRequested()
+{
+    auto* const packageManagerWidget = qobject_cast<QQuickWidget*>(m_pmuiWidget);
+    if (!packageManagerWidget || !packageManagerWidget->rootObject()) return;
+
+    QObject* const root = packageManagerWidget->rootObject();
+    QObject* const backendStore = root->objectName() == QLatin1String("pmui.BackendStore")
+        ? root
+        : root->findChild<QObject*>(QStringLiteral("pmui.BackendStore"));
+    if (!backendStore) return;
+
+    if (!QMetaObject::invokeMethod(backendStore, "refreshCatalog", Qt::QueuedConnection)) {
+        qWarning() << "Package Manager UI does not expose refreshCatalog";
+    }
 }

@@ -245,6 +245,7 @@ signals:
     void installGateConfirmationRequested(const QString& name,
                                           const QString& releaseTag,
                                           const QVariantList& depChanges);
+    void packageManagerUiRefreshRequested();
 
     // MDI coordination (re-emitted from UIPluginManager).
     void pluginWindowRequested(QWidget* widget, const QString& title);

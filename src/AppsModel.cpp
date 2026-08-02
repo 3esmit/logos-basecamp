@@ -316,6 +316,10 @@ void AppsModel::mergeLocalOnlyInstalled(const QVariantList& installedPackages)
     for (const QVariant& v : installedPackages) {
         const QVariantMap pkg = v.toMap();
         if (pkg.value("name").toString().isEmpty()) continue;
+        // Only user packages own synthetic Local rows. An embedded package
+        // with the same runtime module name must not preserve a stale row
+        // after its user-installed counterpart is removed.
+        if (pkg.value("installType").toString() != QLatin1String("user")) continue;
         freshNames.insert(installedModuleName(pkg));
     }
 
