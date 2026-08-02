@@ -132,13 +132,18 @@ int main(int argc, char *argv[])
     // overrides baseDirectory() as-is (no "Dev" suffix), so the user gets the
     // exact path they asked for. parse() rather than process() so unrecognised
     // flags (e.g. Qt's own -platform, -style) don't abort startup.
+    bool smokeCheck = false;
     {
         QCommandLineParser parser;
         QCommandLineOption userDirOption({"u", "user-dir"},
             QStringLiteral("Override the data directory (isolates plugins, "
                            "modules, module_data, logs for this instance)."),
             QStringLiteral("path"));
+        QCommandLineOption smokeCheckOption(
+            QStringLiteral("smoke-check"),
+            QStringLiteral("Exit after verifying Basecamp's top-level QML startup views."));
         parser.addOption(userDirOption);
+        parser.addOption(smokeCheckOption);
         if (!parser.parse(app.arguments())) {
             std::cerr << parser.errorText().toStdString() << std::endl;
             return 1;
@@ -159,6 +164,7 @@ int main(int argc, char *argv[])
             }
             qputenv("LOGOS_USER_DIR", absUserDir.toUtf8());
         }
+        smokeCheck = parser.isSet(smokeCheckOption);
     }
 
     // Redirect stdout/stderr to a rotating per-session log file under
@@ -259,6 +265,19 @@ int main(int argc, char *argv[])
     // destruction ordering explicitly during shutdown (see below).
     auto mainWindow = std::make_unique<Window>(&logosAPI);
     mainWindow->show();
+
+    if (smokeCheck) {
+        Window* const smokeWindow = mainWindow.get();
+        QTimer::singleShot(0, &app, [&app, smokeWindow]() {
+            if (!smokeWindow || !smokeWindow->mainUiStartupReady()) {
+                qCritical() << "Basecamp QML smoke check failed.";
+                app.exit(1);
+                return;
+            }
+            qInfo() << "Basecamp QML smoke check passed.";
+            app.exit(0);
+        });
+    }
 
 #ifdef ENABLE_QML_INSPECTOR
     // Start QML Inspector server (controlled by QML_INSPECTOR_PORT env var, default 3768)

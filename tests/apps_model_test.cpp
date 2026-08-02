@@ -1240,6 +1240,24 @@ private slots:
                  QStringLiteral("user_mod"));
     }
 
+    void mergeLocalOnly_prunes_user_row_when_only_embedded_duplicate_remains()
+    {
+        AppsModel model;
+        model.mergeLocalOnlyInstalled({
+            makeInstalledPackage("shared_mod", "1.0", "H_user", "misc",
+                                 QStringLiteral("user")),
+        });
+        QCOMPARE(model.rowCount(), 1);
+
+        // The user package was removed. The embedded package shares the
+        // runtime identity but must not keep the synthetic Local row alive.
+        model.mergeLocalOnlyInstalled({
+            makeInstalledPackage("shared_mod", "1.0", "H_embedded", "misc",
+                                 QStringLiteral("embedded")),
+        });
+        QCOMPARE(model.rowCount(), 0);
+    }
+
     void replaceCatalog_preserves_local_row_when_catalog_still_lacks_it()
     {
         AppsModel model;

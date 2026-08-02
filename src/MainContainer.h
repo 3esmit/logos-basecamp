@@ -40,6 +40,7 @@ private slots:
     void onPluginWindowRequested(QWidget* widget, const QString& title);
     void onPluginWindowRemoveRequested(QWidget* widget);
     void onPluginWindowActivateRequested(QWidget* widget);
+    void onPackageManagerUiRefreshRequested();
     // Called from QML whenever the combined visibility of the three
     // overlay dialogs flips. We use it to toggle mouse-event
     // passthrough on the overlay QQuickWidget — transparent to mouse

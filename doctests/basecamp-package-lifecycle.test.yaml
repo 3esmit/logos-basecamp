@@ -11,11 +11,9 @@ intro: |
      file and asks the `package_manager` module to gate the install; Basecamp
      acks the module's `beforeInstall` event and shows the **install gate**
      dialog (name, version, dependency changes). Confirming lets the Package
-     Manager install the file, and after a reload the app appears in the
-     sidebar. (The reload is a workaround for a current stack bug: the
-     module's `uiPluginFileInstalled` event isn't emitted for QML-only
-     packages, so nothing auto-refreshes after a fresh local install — the
-     spec marks the affected steps inline.)
+     Manager install the file. Basecamp performs a bounded fallback metadata
+     refresh after the gate is approved, so a QML-only local app appears in the
+     sidebar without asking the user to reload.
   2. **Upgrade** it with a second `.lgx` (v0.2.1) — the same entry point detects
      the package is already installed and routes through the **upgrade gate**
      (`beforeUpgrade`) instead: the dialog leads with "Upgrade … to v0.2.1".
@@ -369,36 +367,11 @@ sections:
               find_value: "confirmationDialog.installGate.confirm"
               text: "The decision flows back through the module gate (`confirmInstallGate`), the module approves the pending install, and PMU — seeing its stashed local path for this name — installs the file straight from disk, no download."
 
-            # WORKAROUND — remove once the stack bug is fixed: for a QML-only
-            # package (`main` empty in the manifest), logos-package-manager's
-            # installPluginFile leaves its installedPluginPath out-param empty,
-            # so PackageManagerImpl::installPlugin never emits
-            # `uiPluginFileInstalled`. Neither Basecamp's sidebar nor PMU's own
-            # list auto-refreshes after a fresh local install (upgrades and
-            # uninstalls DO auto-refresh — their `uiPluginUninstalled` event
-            # fires normally). Until that's fixed, do what a user would: hit
-            # Reload on the Applications panel, which runs the same
-            # fetchUiPluginMetadata + installed-packages scan the event would
-            # have triggered.
-            - name: "Open the Applications panel"
-              action: click
-              target: "Applications"
-
-            - name: "Applications view loads"
-              action: wait_for
-              texts: ["Install and manage applications."]
-              timeout: 30000
-
-            - name: "Reload the app list"
-              action: click_object
-              find_by: "objectName"
-              find_value: "appManager.reloadButton"
-
             - name: "The app appears in the sidebar"
               action: wait_for
               texts: ["Lifecycle Demo"]
               timeout: 60000
-              text: "After the refresh, Basecamp picks up the new plugin metadata and the app shows up in the sidebar under its `display_name`."
+              text: "Basecamp's post-approval fallback refresh picks up the new QML-only plugin metadata, so the app appears in the sidebar under its `display_name` without a manual reload."
               screenshot: "pkglife-installed.png"
 
             # The sidebar entry comes from the UI-plugin metadata fetch; the
@@ -456,21 +429,10 @@ sections:
               action: click
               target: "Package Manager"
 
-            # Same missing-`uiPluginFileInstalled` workaround as above, PMU
-            # side: its own post-install refresh raced the local install, so
-            # the synthetic "local" row may be absent until the next refresh.
-            # refreshCatalog is the slot behind PMU's Reload button.
-            - name: "Reload the package list"
-              action: call_method
-              find_by: "objectName"
-              find_value: "pmui.BackendStore"
-              method: "refreshCatalog"
-              args: []
-
             - name: "The installed app is listed under the local source"
               action: sleep
               ms: 5000
-              text: "The Package Manager now lists the installed app as a **local** row — a user-installed package the catalog doesn't publish."
+              text: "The approved-install fallback refresh updates both Basecamp and the mounted Package Manager view, so the app is listed as a **local** row without a manual reload."
               screenshot: "pkglife-pm-local-row.png"
 
             # The list also carries the bundled default repository's catalog,

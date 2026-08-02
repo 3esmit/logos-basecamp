@@ -20,6 +20,7 @@
 #include <QStandardPaths>
 #include <QTimer>
 #include <QWindow>
+#include <QQuickWidget>
 #include "LogosBasecampPaths.h"
 #ifdef Q_OS_MAC
     #include "trafficLightsTitleBar.h"
@@ -77,6 +78,24 @@ Window::~Window()
     if (m_trayIcon) {
         delete m_trayIcon;
     }
+}
+
+bool Window::mainUiStartupReady() const
+{
+    static constexpr const char* kRequiredQmlViews[] = {
+        "basecamp.qml.sidebar",
+        "basecamp.qml.content",
+        "basecamp.qml.overlay",
+    };
+
+    for (const char* objectName : kRequiredQmlViews) {
+        const auto* view = findChild<QQuickWidget*>(QLatin1String(objectName));
+        if (!view || view->status() != QQuickWidget::Ready || !view->rootObject()) {
+            qCritical() << "Basecamp QML startup view is not ready:" << objectName;
+            return false;
+        }
+    }
+    return true;
 }
 
 void Window::setupUi()

@@ -113,6 +113,8 @@ MainUIBackend::MainUIBackend(LogosAPI* logosAPI, QObject* parent)
             this,             &MainUIBackend::upgradeCascadeConfirmationRequested);
     connect(m_packageCoordinator, &PackageCoordinator::installGateConfirmationRequested,
             this,             &MainUIBackend::installGateConfirmationRequested);
+    connect(m_packageCoordinator, &PackageCoordinator::packageManagerUiRefreshRequested,
+            this,             &MainUIBackend::packageManagerUiRefreshRequested);
     connect(m_packageCoordinator, &PackageCoordinator::uninstallMultiCascadeConfirmationRequested,
             this,             &MainUIBackend::uninstallMultiCascadeConfirmationRequested);
     connect(m_packageCoordinator, &PackageCoordinator::requestOpenAddApplicationDialog,
@@ -341,4 +343,3 @@ QString MainUIBackend::callCoreModuleMethod(const QString& n,
 QString      MainUIBackend::buildVersion() const    { return LogosBasecampBuildInfo::version(); }
 bool         MainUIBackend::isPortableBuild() const { return LogosBasecampBuildInfo::isPortableBuild(); }
 QVariantList MainUIBackend::buildCommits() const    { return LogosBasecampBuildInfo::commits(); }
-
