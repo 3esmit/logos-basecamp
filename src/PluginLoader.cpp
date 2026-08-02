@@ -314,7 +314,7 @@ void PluginLoader::loadQmlView(const PluginLoadRequest& request,
         const QString providerName =
             VerifiedAssetImageProvider::createScopedProviderName();
         QmlSandbox::configure(
-            engine, request.installDir, request.qmlViewPath, appLibDir, providerName);
+            engine, request.installDir, request.qmlViewPath, appLibDir, providerName, request.name);
         engine->addImageProvider(
             providerName,
             new VerifiedAssetImageProvider(

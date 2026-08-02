@@ -13,6 +13,8 @@ permissions:
 
 env:
   ATTIC_CACHE: ${{ github.ref == 'refs/heads/master' && 'public' || 'ci' }}
+  # Empty on fork PRs (secrets not available) — Attic steps skip via the if below.
+  ATTIC_ENDPOINT: ${{ secrets.ATTIC_ENDPOINT }}
 
 jobs:
   release_contract:
@@ -95,7 +97,7 @@ jobs:
         if: env.ATTIC_AVAILABLE == 'true'
         uses: ryanccn/attic-action@v0.4.1
         with:
-          endpoint: ${{ secrets.ATTIC_ENDPOINT }}
+          endpoint: ${{ env.ATTIC_ENDPOINT }}
           cache: ${{ env.ATTIC_CACHE }}
           inputs-from: "."
           token: ${{ github.ref == 'refs/heads/master' && secrets.ATTIC_TOKEN_PUBLIC || secrets.ATTIC_TOKEN_CI }}
@@ -149,7 +151,7 @@ jobs:
         if: env.ATTIC_AVAILABLE == 'true'
         uses: ryanccn/attic-action@v0.4.1
         with:
-          endpoint: ${{ secrets.ATTIC_ENDPOINT }}
+          endpoint: ${{ env.ATTIC_ENDPOINT }}
           cache: ${{ env.ATTIC_CACHE }}
           inputs-from: "."
           token: ${{ github.ref == 'refs/heads/master' && secrets.ATTIC_TOKEN_PUBLIC || secrets.ATTIC_TOKEN_CI }}
@@ -209,13 +211,46 @@ jobs:
         if: env.ATTIC_AVAILABLE == 'true'
         uses: ryanccn/attic-action@v0.4.1
         with:
-          endpoint: ${{ secrets.ATTIC_ENDPOINT }}
+          endpoint: ${{ env.ATTIC_ENDPOINT }}
           cache: ${{ env.ATTIC_CACHE }}
           inputs-from: "."
           token: ${{ github.ref == 'refs/heads/master' && secrets.ATTIC_TOKEN_PUBLIC || secrets.ATTIC_TOKEN_CI }}
 
+      - name: Unit tests
+        run: nix build .#unit-tests -L
+
+      - name: QML tests
+        run: nix build .#qml-tests -L
+
+      - name: Sandbox test
+        run: nix build .#sandbox-test -L
+
       - name: Integration test (UI tests)
         run: nix build .#integration-test -L
+
+      - name: Shutdown lifecycle test
+        if: matrix.arch == 'x86_64-linux'
+        run: nix build .#shutdown-test -L
+
+      # Report-only non-blocking for now
+      - name: Coverage report
+        continue-on-error: true
+        run: |
+          nix build .#coverage -L
+          {
+            echo '## Unit-test coverage'
+            echo '```'
+            cat result/coverage.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload coverage report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report-${{ matrix.arch }}
+          path: result/
+          if-no-files-found: ignore
 
   test-macos:
     needs: release_contract
@@ -245,10 +280,19 @@ jobs:
         if: env.ATTIC_AVAILABLE == 'true'
         uses: ryanccn/attic-action@v0.4.1
         with:
-          endpoint: ${{ secrets.ATTIC_ENDPOINT }}
+          endpoint: ${{ env.ATTIC_ENDPOINT }}
           cache: ${{ env.ATTIC_CACHE }}
           inputs-from: "."
           token: ${{ github.ref == 'refs/heads/master' && secrets.ATTIC_TOKEN_PUBLIC || secrets.ATTIC_TOKEN_CI }}
+
+      - name: Unit tests
+        run: nix build .#unit-tests -L
+
+      - name: QML tests
+        run: nix build .#qml-tests -L
+
+      - name: Sandbox test
+        run: nix build .#sandbox-test -L
 
       - name: Integration test (UI tests)
         run: nix build .#integration-test-bundle -L

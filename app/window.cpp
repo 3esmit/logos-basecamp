@@ -9,13 +9,17 @@
 #include <QFile>
 #include <QSystemTrayIcon>
 #include <QMenu>
+#include <QMenuBar>
 #include <QAction>
+#include <QKeySequence>
+#include <QShortcut>
 #include <QCloseEvent>
 #include <QIcon>
 #include <QPixmap>
 #include <IComponent.h>
 #include <QStandardPaths>
 #include <QTimer>
+#include <QWindow>
 #include "LogosBasecampPaths.h"
 #ifdef Q_OS_MAC
     #include "trafficLightsTitleBar.h"
@@ -30,8 +34,19 @@ Window::Window(QWidget *parent)
     , m_showHideAction(nullptr)
     , m_quitAction(nullptr)
 {
+    setObjectName(QStringLiteral("logosMainWindow"));
     setupUi();
     createTrayIcon();
+#ifdef Q_OS_MAC
+    createMenuBar();
+#endif
+#ifdef Q_OS_LINUX
+    // GNOME/KDE convention: Ctrl+Q quits. QKeySequence::Quit maps to Ctrl+Q
+    // on X11/Wayland and is empty on Windows.
+    auto* quitShortcut = new QShortcut(QKeySequence::Quit, this);
+    quitShortcut->setObjectName(QStringLiteral("logosQuitShortcut"));
+    connect(quitShortcut, &QShortcut::activated, this, &Window::quitApplication);
+#endif
 }
 
 Window::Window(LogosAPI* logosAPI, QWidget *parent)
@@ -42,8 +57,19 @@ Window::Window(LogosAPI* logosAPI, QWidget *parent)
     , m_showHideAction(nullptr)
     , m_quitAction(nullptr)
 {
+    setObjectName(QStringLiteral("logosMainWindow"));
     setupUi();
     createTrayIcon();
+#ifdef Q_OS_MAC
+    createMenuBar();
+#endif
+#ifdef Q_OS_LINUX
+    // GNOME/KDE convention: Ctrl+Q quits. QKeySequence::Quit maps to Ctrl+Q
+    // on X11/Wayland and is empty on Windows.
+    auto* quitShortcut = new QShortcut(QKeySequence::Quit, this);
+    quitShortcut->setObjectName(QStringLiteral("logosQuitShortcut"));
+    connect(quitShortcut, &QShortcut::activated, this, &Window::quitApplication);
+#endif
 }
 
 Window::~Window()
@@ -190,12 +216,30 @@ void Window::showEvent(QShowEvent* event)
 void Window::setupMacOSDockReopen()
 {
     connect(qApp, &QApplication::applicationStateChanged, this, [this](Qt::ApplicationState state) {
-        if (state == Qt::ApplicationActive && !isVisible()) {
-            show();
-            raise();
-            activateWindow();
-        }
+        if (state == Qt::ApplicationActive && !isWindowShown())
+            restoreWindow();
     });
+}
+
+// Override Qt's default macOS "Quit" (which posts a close event and gets
+// swallowed by hide-to-tray). QuitRole promotes this action into the native
+// app menu so Cmd+Q actually terminates the process.
+void Window::createMenuBar()
+{
+    QAction* quit = menuBar()->addMenu(tr("File"))->addAction(tr("Quit"));
+    quit->setObjectName(QStringLiteral("logosQuitAction"));
+    quit->setShortcut(QKeySequence::Quit);
+    quit->setMenuRole(QAction::QuitRole);
+    connect(quit, &QAction::triggered, this, &Window::quitApplication);
+
+    // Frameless on macOS means no native title bar and no Window menu, so
+    // nothing is bound to Cmd+M — route it to the traffic light's action.
+    // Qt maps Ctrl to Command here (see Qt::AA_MacDontSwapCtrlAndMeta).
+    QAction* minimize = menuBar()->addMenu(tr("Window"))->addAction(tr("Minimize"));
+    minimize->setObjectName(QStringLiteral("logosMinimizeAction"));
+    minimize->setShortcut(QKeySequence(QStringLiteral("Ctrl+M"))); // Cmd+M on macOS
+    minimize->setMenuRole(QAction::NoRole);
+    connect(minimize, &QAction::triggered, this, &QWidget::showMinimized);
 }
 #endif
 
@@ -215,12 +259,14 @@ void Window::createTrayIcon()
     m_trayIconMenu = new QMenu(this);
 
     m_showHideAction = m_trayIconMenu->addAction(tr("Show/Hide"));
+    m_showHideAction->setObjectName(QStringLiteral("logosTrayShowHideAction"));
     m_showHideAction->setCheckable(false);
     connect(m_showHideAction, &QAction::triggered, this, &Window::showHideWindow);
 
     m_trayIconMenu->addSeparator();
 
     m_quitAction = m_trayIconMenu->addAction(tr("Quit"));
+    m_quitAction->setObjectName(QStringLiteral("logosTrayQuitAction"));
     connect(m_quitAction, &QAction::triggered, this, &Window::quitApplication);
 
     m_trayIcon->setContextMenu(m_trayIconMenu);
@@ -280,19 +326,57 @@ void Window::closeEvent(QCloseEvent *event)
             );
         }
     } else {
-        // If system tray is not available, quit normally
+        // No tray means the running application would have no reachable UI.
         event->accept();
+        QApplication::quit();
     }
+}
+
+bool Window::isWindowShown() const
+{
+    // isVisible() alone is not enough: it stays true when minimized (#268), and
+    // on Wayland only exposure reveals that. Exposure can also drop for an
+    // occluded window, which then raises instead of hiding — the harmless miss.
+    const QWindow* handle = windowHandle();
+    if (!isVisible() || isMinimized() || (handle && !handle->isExposed()))
+        return false;
+#ifdef Q_OS_MAC
+    return !macAppIsHidden();
+#else
+    return true;
+#endif
+}
+
+void Window::restoreWindow()
+{
+    // macOS: order back in first, or show() re-applies WindowMinimized.
+    if (!isVisible())
+        show();
+    // Clear only the minimized bit, so maximized/fullscreen survives.
+    if (isMinimized())
+        setWindowState(windowState() & ~Qt::WindowMinimized);
+
+#ifdef Q_OS_MAC
+    macDeminiaturize(this);
+    macActivateApp();
+#else
+    // The state bit is advisory on X11 and a no-op on Wayland (no unminimize
+    // request exists), so force a fresh map — that every display server honours.
+    if (windowHandle() && !windowHandle()->isExposed()) {
+        hide();
+        show();
+    }
+#endif
+    raise();
+    activateWindow();
 }
 
 void Window::showHideWindow()
 {
-    if (isVisible()) {
+    if (isWindowShown()) {
         hide();
     } else {
-        show();
-        raise();
-        activateWindow();
+        restoreWindow();
     }
 }
 

@@ -60,6 +60,28 @@ QVariantMap makeDep(const QString& name, const QString& version = {})
     return d;
 }
 
+// Shape returned by package_manager.getInstalledPackages() — matches the
+// InstalledPackage JSON in logos-package-manager. Only the fields
+// mergeLocalOnlyInstalled reads are populated here.
+QVariantMap makeInstalledPackage(const QString& name,
+                                 const QString& version,
+                                 const QString& rootHash,
+                                 const QString& category = {},
+                                 const QString& installType = QStringLiteral("user"))
+{
+    QVariantMap hashes;
+    hashes.insert(QStringLiteral("root"), rootHash);
+
+    QVariantMap pkg;
+    pkg.insert(QStringLiteral("name"),        name);
+    pkg.insert(QStringLiteral("version"),     version);
+    pkg.insert(QStringLiteral("hashes"),      hashes);
+    pkg.insert(QStringLiteral("installType"), installType);
+    if (!category.isEmpty())
+        pkg.insert(QStringLiteral("category"), category);
+    return pkg;
+}
+
 QVariantMap makeCatalogRow(const QString& repo,
                            const QString& name,
                            const QString& version,
@@ -967,6 +989,317 @@ private slots:
             QCOMPARE(deps.first().toMap().value("name").toString(),
                      QStringLiteral("wallet_module"));
         }
+    }
+
+    // ── mergeLocalOnlyInstalled + replaceCatalog local-preservation ────
+    // Locks the "installed-but-uncatalogued" behaviour: names in the
+    // installed-set that the catalog doesn't publish get a synthetic row
+    // with empty repositoryUrl (rendered under a "Local" section). Names
+    // the catalog does publish are the catalog's job — mergeLocalOnly
+    // must not double-insert.
+
+    void mergeLocalOnly_adds_row_for_uncatalogued_installed()
+    {
+        AppsModel model;
+        model.replaceCatalog({});   // no repos configured
+        model.mergeLocalOnlyInstalled({
+            makeInstalledPackage("side_loaded_module", "1.2.3", "H_side", "utilities"),
+        });
+        QCOMPARE(model.rowCount(), 1);
+
+        int nameRole = -1, repoRole = -1, catRole = -1, verRole = -1,
+            typeRole = -1, statusRole = -1;
+        const auto& roles = model.roleNames();
+        for (auto it = roles.cbegin(); it != roles.cend(); ++it) {
+            if      (it.value() == "name")             nameRole   = it.key();
+            else if (it.value() == "repositoryUrl")    repoRole   = it.key();
+            else if (it.value() == "category")         catRole    = it.key();
+            else if (it.value() == "installedVersion") verRole    = it.key();
+            else if (it.value() == "installType")      typeRole   = it.key();
+            else if (it.value() == "installStatus")    statusRole = it.key();
+        }
+        const QModelIndex idx = model.index(0);
+        QCOMPARE(model.data(idx, nameRole).toString(),
+                 QStringLiteral("side_loaded_module"));
+        // Repo empty = the "Local" bucket marker.
+        QCOMPARE(model.data(idx, repoRole).toString(), QString());
+        // Module's own category survives — Local is a repo slot, not a
+        // category override.
+        QCOMPARE(model.data(idx, catRole).toString(),  QStringLiteral("utilities"));
+        QCOMPARE(model.data(idx, verRole).toString(),  QStringLiteral("1.2.3"));
+        QCOMPARE(model.data(idx, typeRole).toString(), QStringLiteral("user"));
+        // No catalog version to compare against → Installed best-effort.
+        QCOMPARE(static_cast<InstallStatus::Value>(model.data(idx, statusRole).toInt()),
+                 InstallStatus::Installed);
+    }
+
+    void mergeLocalOnly_skips_names_covered_by_catalog()
+    {
+        AppsModel model;
+        model.replaceCatalog({
+            makeCatalogRow("repo1", "wallet_ui",  "1.0", "H_repo"),
+        });
+        model.mergeLocalOnlyInstalled({
+            // Catalog already has wallet_ui → NO synthetic row.
+            makeInstalledPackage("wallet_ui",       "1.0", "H_repo",  "wallet"),
+            // No catalog row for orphan_mod → gets a Local row.
+            makeInstalledPackage("orphan_mod", "1.0", "H_orphan", "misc"),
+        });
+        // 1 catalog row + 1 local row (wallet_ui not duplicated).
+        QCOMPARE(model.rowCount(), 2);
+
+        int nameRole = -1, repoRole = -1;
+        const auto& roles = model.roleNames();
+        for (auto it = roles.cbegin(); it != roles.cend(); ++it) {
+            if      (it.value() == "name")          nameRole = it.key();
+            else if (it.value() == "repositoryUrl") repoRole = it.key();
+        }
+        // wallet_ui stays on its catalog row (repo1). orphan_mod is Local.
+        bool sawWalletOnRepo = false, sawOrphanOnLocal = false;
+        for (int i = 0; i < model.rowCount(); ++i) {
+            const QModelIndex idx = model.index(i);
+            const QString n = model.data(idx, nameRole).toString();
+            const QString r = model.data(idx, repoRole).toString();
+            if (n == "wallet_ui"  && r == "repo1") sawWalletOnRepo = true;
+            if (n == "orphan_mod" && r == "")      sawOrphanOnLocal = true;
+        }
+        QVERIFY(sawWalletOnRepo);
+        QVERIFY(sawOrphanOnLocal);
+    }
+
+    void mergeLocalOnly_is_idempotent()
+    {
+        AppsModel model;
+        model.mergeLocalOnlyInstalled({
+            makeInstalledPackage("orphan_mod", "1.0", "H", "misc"),
+        });
+        QCOMPARE(model.rowCount(), 1);
+        // Second call with the same input must not duplicate.
+        model.mergeLocalOnlyInstalled({
+            makeInstalledPackage("orphan_mod", "1.0", "H", "misc"),
+        });
+        QCOMPARE(model.rowCount(), 1);
+    }
+
+    void mergeLocalOnly_uses_runtime_module_identity()
+    {
+        QVariantMap installed = makeInstalledPackage(
+            "artifact_package", "1.2.3", "H_runtime", "utilities");
+        installed.insert("moduleName", "runtime_module");
+
+        AppsModel localModel;
+        localModel.mergeLocalOnlyInstalled({installed});
+        QCOMPARE(localModel.rowCount(), 1);
+        const QModelIndex localIndex = localModel.index(0);
+        QCOMPARE(localModel.data(localIndex, AppsModel::NameRole).toString(),
+                 QStringLiteral("runtime_module"));
+
+        // PackageCoordinator keys on moduleName, so the Local row must use
+        // the same identity or a refresh clears its installed state.
+        localModel.replaceInstalledSet(
+            {{QStringLiteral("runtime_module"), QStringLiteral("1.2.3")}},
+            {{QStringLiteral("runtime_module"), QStringLiteral("H_runtime")}});
+        QCOMPARE(localModel.data(localIndex, AppsModel::InstalledVersionRole).toString(),
+                 QStringLiteral("1.2.3"));
+
+        QSignalSpy insertedSpy(&localModel, &QAbstractItemModel::rowsInserted);
+        QSignalSpy removedSpy(&localModel, &QAbstractItemModel::rowsRemoved);
+        localModel.mergeLocalOnlyInstalled({installed});
+        QCOMPARE(insertedSpy.count(), 0);
+        QCOMPARE(removedSpy.count(), 0);
+
+        // A catalog entry is likewise keyed by the loadable module name,
+        // rather than the artifact package name.
+        AppsModel catalogModel;
+        catalogModel.replaceCatalog({
+            makeCatalogRow("repo1", "runtime_module", "1.2.3", "H_runtime"),
+        });
+        catalogModel.mergeLocalOnlyInstalled({installed});
+        QCOMPARE(catalogModel.rowCount(), 1);
+        const QModelIndex catalogIndex = catalogModel.index(0);
+        QCOMPARE(catalogModel.data(catalogIndex, AppsModel::NameRole).toString(),
+                 QStringLiteral("runtime_module"));
+        QCOMPARE(catalogModel.data(catalogIndex, AppsModel::RepositoryUrlRole).toString(),
+                 QStringLiteral("repo1"));
+    }
+
+    void mergeLocalOnly_refreshes_existing_local_metadata()
+    {
+        AppsModel model;
+        QVariantMap initial = makeInstalledPackage("orphan_mod", "1.0", "H1", "tools");
+        initial.insert("displayName", "Original name");
+        initial.insert("description", "Original description");
+        initial.insert("type", "ui_qml");
+        model.mergeLocalOnlyInstalled({initial});
+        QCOMPARE(model.rowCount(), 1);
+
+        QSignalSpy dataChangedSpy(&model, &AppsModel::dataChanged);
+        QVariantMap upgraded = makeInstalledPackage("orphan_mod", "2.0", "H2", "wallet");
+        upgraded.insert("displayName", "Updated name");
+        upgraded.insert("description", "Updated description");
+        upgraded.insert("type", "core");
+        model.mergeLocalOnlyInstalled({upgraded});
+
+        const QModelIndex idx = model.index(0);
+        QCOMPARE(model.data(idx, AppsModel::DisplayNameRole).toString(),
+                 QStringLiteral("Updated name"));
+        QCOMPARE(model.data(idx, AppsModel::DescriptionRole).toString(),
+                 QStringLiteral("Updated description"));
+        QCOMPARE(model.data(idx, AppsModel::CategoryRole).toString(),
+                 QStringLiteral("wallet"));
+        QCOMPARE(model.data(idx, AppsModel::TypeRole).toString(),
+                 QStringLiteral("core"));
+        QCOMPARE(dataChangedSpy.count(), 1);
+    }
+
+    // ── Regression: uninstalling a local-only module removes its row ────
+    //
+    // Bug: mergeLocalOnlyInstalled is called by PackageCoordinator after
+    // every install/uninstall/reload with the FRESH installed-packages
+    // list. When a user uninstalls a local-only module via PMUI:
+    //   - PMUI removes it from its own state (row disappears from PMUI).
+    //   - PackageCoordinator's uiPluginUninstalled handler fires refresh.
+    //   - refreshDependencyInfo repopulates m_installedPackagesCache with
+    //     the fresh list (module gone).
+    //   - AppsModel::mergeLocalOnlyInstalled(fresh_cache) runs.
+    // The row must vanish. Before the fix, mergeLocalOnlyInstalled was
+    // add-only — the previously-inserted local row survived because the
+    // merge iterates the fresh list and only adds; there was no removal
+    // pass for names that dropped out. Reload runs the same code path so
+    // nothing recovered until an app restart.
+    void mergeLocalOnly_removes_row_when_installed_set_drops_the_name()
+    {
+        AppsModel model;
+        model.replaceCatalog({});
+        model.mergeLocalOnlyInstalled({
+            makeInstalledPackage("orphan_mod", "1.0", "H", "misc"),
+        });
+        QCOMPARE(model.rowCount(), 1);
+
+        // User uninstalls orphan_mod → next merge sees an empty user set.
+        // The Local row for it must disappear.
+        model.mergeLocalOnlyInstalled({});
+        QCOMPARE(model.rowCount(), 0);
+    }
+
+    // Same reconciliation with a catalog present: catalog rows are the
+    // catalog's job (replaceCatalog owns them), so they must NOT be
+    // affected by the local-only prune. Only rows with empty
+    // repositoryUrl whose name is no longer in the fresh installed set
+    // are dropped.
+    void mergeLocalOnly_removes_only_local_rows_leaves_catalog_intact()
+    {
+        AppsModel model;
+        model.replaceCatalog({
+            makeCatalogRow("repo1", "wallet_ui", "1.0", "H_ui"),
+        });
+        model.mergeLocalOnlyInstalled({
+            makeInstalledPackage("orphan_mod", "1.0", "H_orphan", "misc"),
+        });
+        QCOMPARE(model.rowCount(), 2);   // catalog + local
+
+        // Uninstall orphan_mod. wallet_ui is not user-installed either
+        // (empty fresh set) — its catalog row must still survive because
+        // catalog rows are managed by replaceCatalog, not by the local
+        // merge.
+        model.mergeLocalOnlyInstalled({});
+        QCOMPARE(model.rowCount(), 1);
+
+        int nameRole = -1, repoRole = -1;
+        const auto& roles = model.roleNames();
+        for (auto it = roles.cbegin(); it != roles.cend(); ++it) {
+            if      (it.value() == "name")          nameRole = it.key();
+            else if (it.value() == "repositoryUrl") repoRole = it.key();
+        }
+        const QModelIndex idx = model.index(0);
+        QCOMPARE(model.data(idx, nameRole).toString(), QStringLiteral("wallet_ui"));
+        QCOMPARE(model.data(idx, repoRole).toString(), QStringLiteral("repo1"));
+    }
+
+    // Embedded packages ship inside the app bundle, not under Application
+    // Support. They're already surfaced through the built-in module list —
+    // synthesising a Local row for them would double-list. Gate: only
+    // installType == "user" packages become Local rows.
+    void mergeLocalOnly_skips_embedded_installType()
+    {
+        AppsModel model;
+        model.mergeLocalOnlyInstalled({
+            makeInstalledPackage("embedded_mod", "1.0", "H_emb", "misc",
+                                 QStringLiteral("embedded")),
+            makeInstalledPackage("user_mod",     "2.0", "H_usr", "misc",
+                                 QStringLiteral("user")),
+        });
+        QCOMPARE(model.rowCount(), 1);
+
+        int nameRole = -1;
+        const auto& roles = model.roleNames();
+        for (auto it = roles.cbegin(); it != roles.cend(); ++it) {
+            if (it.value() == "name") { nameRole = it.key(); break; }
+        }
+        QCOMPARE(model.data(model.index(0), nameRole).toString(),
+                 QStringLiteral("user_mod"));
+    }
+
+    void replaceCatalog_preserves_local_row_when_catalog_still_lacks_it()
+    {
+        AppsModel model;
+        model.replaceCatalog({});
+        model.mergeLocalOnlyInstalled({
+            makeInstalledPackage("orphan_mod", "1.0", "H", "misc"),
+        });
+        QCOMPARE(model.rowCount(), 1);
+
+        // A subsequent catalog refresh — different repos come and go — must
+        // not sweep away the local row that no repo has adopted yet.
+        model.replaceCatalog({
+            makeCatalogRow("repo1", "wallet_ui", "1.0", "H_ui"),
+        });
+        QCOMPARE(model.rowCount(), 2);   // catalog row + local row
+
+        int nameRole = -1, repoRole = -1;
+        const auto& roles = model.roleNames();
+        for (auto it = roles.cbegin(); it != roles.cend(); ++it) {
+            if      (it.value() == "name")          nameRole = it.key();
+            else if (it.value() == "repositoryUrl") repoRole = it.key();
+        }
+        bool sawOrphanLocal = false;
+        for (int i = 0; i < model.rowCount(); ++i) {
+            const QModelIndex idx = model.index(i);
+            if (model.data(idx, nameRole).toString() == "orphan_mod"
+                && model.data(idx, repoRole).toString().isEmpty()) {
+                sawOrphanLocal = true;
+                break;
+            }
+        }
+        QVERIFY(sawOrphanLocal);
+    }
+
+    void replaceCatalog_drops_local_row_when_catalog_adopts_the_name()
+    {
+        AppsModel model;
+        model.replaceCatalog({});
+        model.mergeLocalOnlyInstalled({
+            makeInstalledPackage("wallet_ui", "1.0", "H_installed", "wallet"),
+        });
+        QCOMPARE(model.rowCount(), 1);
+
+        // A repo is added and now publishes wallet_ui — the local row must
+        // go away, replaced by the catalog row.
+        model.replaceCatalog({
+            makeCatalogRow("repo1", "wallet_ui", "1.0", "H_installed"),
+        });
+        QCOMPARE(model.rowCount(), 1);
+
+        int nameRole = -1, repoRole = -1;
+        const auto& roles = model.roleNames();
+        for (auto it = roles.cbegin(); it != roles.cend(); ++it) {
+            if      (it.value() == "name")          nameRole = it.key();
+            else if (it.value() == "repositoryUrl") repoRole = it.key();
+        }
+        const QModelIndex idx = model.index(0);
+        QCOMPARE(model.data(idx, nameRole).toString(), QStringLiteral("wallet_ui"));
+        // Now under repo1, not the Local bucket.
+        QCOMPARE(model.data(idx, repoRole).toString(), QStringLiteral("repo1"));
     }
 
     void replaceCatalog_preserves_color_field()

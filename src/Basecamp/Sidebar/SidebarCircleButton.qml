@@ -9,15 +9,15 @@ AbstractButton {
     implicitHeight: 38
     implicitWidth: 38
 
-    signal tooltipRequested(string text, real y)
-    signal tooltipCleared()
+    signal tooltipRequested(var source, string text, real y)
+    signal tooltipCleared(var source)
 
     onHoveredChanged: {
         if (hovered && text) {
             var pos = root.mapToItem(null, root.width, root.height / 2)
-            root.tooltipRequested(text, pos.y)
+            root.tooltipRequested(root, text, pos.y)
         } else {
-            root.tooltipCleared()
+            root.tooltipCleared(root)
         }
     }
 

@@ -19,7 +19,7 @@
 #include <QQuickItem>
 #include <QColor>
 #include <QPalette>
-#include <QTimer>
+#include <QEvent>
 
 namespace {
 constexpr int kAppsStackIndex     = 0;  // WorkspaceArea (QDockWidget-based)
@@ -281,6 +281,10 @@ void MainContainer::setupUi()
     }
     m_overlayWidget->setVisible(false);
 
+    // Watch for the mouse leaving the sidebar so we can hide the tooltip
+    // overlay.
+    if (m_sidebarWidget) m_sidebarWidget->installEventFilter(this);
+
     // Set initial state — Apps section (workspace) visible by default.
     m_contentStack->setCurrentIndex(kAppsStackIndex);
 
@@ -326,12 +330,25 @@ void MainContainer::onSidebarTooltipRequested(const QString& text, qreal y)
 
 void MainContainer::onSidebarTooltipCleared()
 {
+    clearSidebarTooltip();
+}
+
+void MainContainer::clearSidebarTooltip()
+{
     if (!m_overlayWidget) return;
     QObject* overlayRoot = m_overlayWidget->rootObject();
     if (!overlayRoot) return;
     overlayRoot->setProperty("sidebarTooltipText", QString());
     const bool dialogUp = overlayRoot->property("anyDialogOpen").toBool();
     if (!dialogUp) m_overlayWidget->setVisible(false);
+}
+
+bool MainContainer::eventFilter(QObject* watched, QEvent* event)
+{
+    if (watched == m_sidebarWidget && event->type() == QEvent::Leave) {
+        clearSidebarTooltip();
+    }
+    return QWidget::eventFilter(watched, event);
 }
 
 void MainContainer::onViewIndexChanged()
@@ -389,4 +406,3 @@ void MainContainer::onPluginWindowActivateRequested(QWidget* widget)
     if (m_workspaceArea && widget)
         m_workspaceArea->activatePluginDock(widget);
 }
-

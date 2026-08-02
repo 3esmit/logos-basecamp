@@ -131,13 +131,13 @@
 
           # Plugin packages (development builds)
           mainUIPlugin = import ./nix/main-ui.nix {
-            inherit pkgs common src logosSdk logosProtocolPkg logosQtSdk logosModule logosPackageManagerModule logosPackageDownloaderModule logosPackageHeaders logosLiblogos logosViewModuleRuntime buildInfo;
+            inherit pkgs common src logosSdk logosProtocolPkg logosQtSdk logosModule logosPackageManagerModule logosPackageDownloaderModule logosPackageHeaders logosLiblogos logosViewModuleRuntime logosDesignSystem buildInfo;
           };
           packageManagerUIPlugin = logosPackageManagerUI;
 
           # Plugin packages (distributed builds for DMG/AppImage)
           mainUIPluginDistributed = import ./nix/main-ui.nix {
-            inherit pkgs common src logosSdk logosProtocolPkg logosQtSdk logosModule logosPackageManagerModule logosPackageDownloaderModule logosPackageHeaders logosLiblogos logosViewModuleRuntime buildInfo;
+            inherit pkgs common src logosSdk logosProtocolPkg logosQtSdk logosModule logosPackageManagerModule logosPackageDownloaderModule logosPackageHeaders logosLiblogos logosViewModuleRuntime logosDesignSystem buildInfo;
             distributed = true;
           };
 
@@ -175,21 +175,6 @@
             portable = true;
             enableInspector = false;
           };
-
-          # macOS distribution packages (only for Darwin)
-          appBundle = if pkgs.stdenv.isDarwin then
-            import ./nix/macos-bundle.nix {
-              inherit pkgs src;
-              app = appDistributed;
-            }
-          else null;
-          
-          dmg = if pkgs.stdenv.isDarwin then
-            import ./nix/macos-dmg.nix {
-              inherit pkgs;
-              appBundle = appBundle;
-            }
-          else null;
 
           # Distributed build with inspector enabled (for macOS integration tests)
           appDistributedWithInspector = import ./nix/app.nix {
@@ -290,10 +275,24 @@
           };
 
           # QML component tests (Qt Quick Test)
-          qml-tests = import ./nix/qml-tests.nix { inherit pkgs src; };
+          qml-tests = import ./nix/qml-tests.nix { inherit pkgs src logosPackageHeaders; };
+
+          # Coverage report for the unit-test suite: same targets as
+          # .#unit-tests, compiled with --coverage and reported via gcovr.
+          # Report-only for now (failUnderLine = 0) — raise the threshold as
+          # the test plan phases land to make it a gate.
+          # Build: nix build .#coverage -L && open result/coverage.html
+          coverage = import ./nix/coverage.nix {
+            inherit pkgs src logosPackageHeaders logosProtocolPkg logosQtSdk;
+            failUnderLine = 0;
+          };
 
           # Integration test (UI tests via Qt Inspector)
           integration-test = import ./nix/integration-test.nix { inherit pkgs src logosQtMcp; appPkg = app; };
+
+          # Shutdown tests (SIGTERM, SIGINT, Ctrl+Q / ⌘Q). Spawns a fresh
+          # app per case and asserts orderly exit (code 0).
+          shutdown-test = import ./nix/shutdown-test.nix { inherit pkgs src logosQtMcp; appPkg = app; };
 
           # Default package
           default = app;
@@ -318,14 +317,7 @@
             inherit logosQtMcp;
             appBin = "${macosAppTest}/LogosBasecamp.app/Contents/MacOS/LogosBasecamp";
           };
-        } // (if pkgs.stdenv.isDarwin then {
-          # macOS distribution outputs
-          app-bundle = appBundle;
-          inherit dmg;
-        } else {}) // (if pkgs.stdenv.isLinux then {
-          # Linux distribution output
-          appimage = appImage;
-        } else {})
+        }
       );
 
       # nix run .                   → dev build  (depends on /nix/store at runtime)
@@ -347,9 +339,10 @@
         unit-tests = self.packages.${system}.unit-tests;
         qml-tests = self.packages.${system}.qml-tests;
         integration-test = self.packages.${system}.integration-test;
+        shutdown-test = self.packages.${system}.shutdown-test;
       });
 
-      devShells = forAllSystems ({ pkgs, logosSdk, logosProtocolPkg, logosQtSdk, logosModule, logosLiblogos, logosPackageManagerLibrary, logosPackageManagerModule, logosCapabilityModule, logosPackageLib, logosDesignSystem, logosCppSdkSrc, logosLiblogosSrc, logosPackageManagerModuleSrc, logosCapabilityModuleSrc }: {
+      devShells = forAllSystems ({ pkgs, logosSdk, logosProtocolPkg, logosQtSdk, logosModule, logosLiblogos, logosPackageManagerLibrary, logosPackageManagerModule, logosCapabilityModule, logosPackageLib, logosDesignSystem, logosCppSdkSrc, logosLiblogosSrc, logosPackageManagerModuleSrc, logosCapabilityModuleSrc, ... }: {
         default = pkgs.mkShell {
           nativeBuildInputs = [
             pkgs.cmake

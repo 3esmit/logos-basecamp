@@ -32,6 +32,7 @@ protected:
     // widget floats over both the sidebar and the content stack, so it
     // can't sit in the HBoxLayout.
     void resizeEvent(QResizeEvent* event) override;
+    bool eventFilter(QObject* watched, QEvent* event) override;
 
 private slots:
     void onViewIndexChanged();
@@ -50,6 +51,7 @@ private slots:
 
 private:
     void setupUi();
+    void clearSidebarTooltip();
 
     // Main layout
     QHBoxLayout* m_mainLayout;
@@ -84,4 +86,3 @@ private:
     LogosAPI* m_logosAPI;
     ShortcutBridge* m_shortcutBridge = nullptr;
 };
-

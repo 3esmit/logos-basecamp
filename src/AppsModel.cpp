@@ -8,6 +8,15 @@
 
 namespace {
 constexpr QChar kSep = QLatin1Char('\n');
+
+// Package names identify the downloaded artifact; moduleName identifies the
+// module that Basecamp loads and manages. Older package-manager responses do
+// not carry moduleName, so retain name as the compatibility fallback.
+QString installedModuleName(const QVariantMap& package)
+{
+    const QString moduleName = package.value("moduleName").toString();
+    return moduleName.isEmpty() ? package.value("name").toString() : moduleName;
+}
 }
 
 QString AppsModel::key(const QString& repo, const QString& name)
@@ -210,16 +219,26 @@ void AppsModel::recomputeVersionDerivedFields(Row& r)
 void AppsModel::replaceCatalog(const QVariantList& catalogRows)
 {
     QSet<QString> incoming;
+    QSet<QString> incomingNames;
     incoming.reserve(catalogRows.size());
+    incomingNames.reserve(catalogRows.size());
     for (const QVariant& v : catalogRows) {
         const QVariantMap row = v.toMap();
         const QString name = row.value("name").toString();
         if (name.isEmpty()) continue;
         incoming.insert(key(row.value("repositoryUrl").toString(), name));
+        incomingNames.insert(name);
     }
 
     QList<int> toRemove;
     for (int i = 0; i < m_rows.size(); ++i) {
+        // Local rows (no repositoryUrl) survive a catalog replace UNLESS the
+        // incoming catalog now provides that name — in which case the catalog
+        // row is the source of truth and the local one is dropped.
+        if (m_rows[i].repositoryUrl.isEmpty()) {
+            if (incomingNames.contains(m_rows[i].name)) toRemove.append(i);
+            continue;
+        }
         const QString k = key(m_rows[i].repositoryUrl, m_rows[i].name);
         if (!incoming.contains(k)) toRemove.append(i);
     }
@@ -285,6 +304,112 @@ void AppsModel::replaceCatalog(const QVariantList& catalogRows)
         }
     }
     emit categoriesChanged();
+}
+
+// ── Mutation: local-only installed rows ────────────────────────────────────
+
+void AppsModel::mergeLocalOnlyInstalled(const QVariantList& installedPackages)
+{
+    // Names still present on disk. Used to drop stale Local rows below.
+    QSet<QString> freshNames;
+    freshNames.reserve(installedPackages.size());
+    for (const QVariant& v : installedPackages) {
+        const QVariantMap pkg = v.toMap();
+        if (pkg.value("name").toString().isEmpty()) continue;
+        freshNames.insert(installedModuleName(pkg));
+    }
+
+    // Prune Local rows whose module got uninstalled. Catalog rows (non-
+    // empty repositoryUrl) are replaceCatalog's job — untouched here.
+    QList<int> toRemove;
+    bool categoriesTouched = false;
+    for (int i = 0; i < m_rows.size(); ++i) {
+        if (!m_rows[i].repositoryUrl.isEmpty()) continue;
+        if (freshNames.contains(m_rows[i].name)) continue;
+        toRemove.append(i);
+        if (!m_rows[i].category.isEmpty()) categoriesTouched = true;
+    }
+    for (int i = toRemove.size() - 1; i >= 0; --i) {
+        const int idx = toRemove[i];
+        beginRemoveRows({}, idx, idx);
+        m_rows.removeAt(idx);
+        endRemoveRows();
+    }
+    if (!toRemove.isEmpty()) {
+        m_indexByKey.clear();
+        m_indicesByName.clear();
+        for (int i = 0; i < m_rows.size(); ++i) {
+            m_indexByKey.insert(key(m_rows[i].repositoryUrl, m_rows[i].name), i);
+            m_indicesByName.insert(m_rows[i].name, i);
+        }
+    }
+
+    for (const QVariant& v : installedPackages) {
+        const QVariantMap pkg = v.toMap();
+        if (pkg.value("name").toString().isEmpty()) continue;
+        const QString name = installedModuleName(pkg);
+
+        // Only surface USER-installed packages (under Application Support)
+        // as Local. Embedded packages ship inside the app bundle and are
+        // already represented via the built-in module list — showing them
+        // here would double-list them and clutter the section.
+        if (pkg.value("installType").toString() != QLatin1String("user")) continue;
+
+        // Refresh a synthetic Local row in place. Installed-package metadata
+        // is authoritative for rows without a catalog source, and can change
+        // when a locally installed package is upgraded while Basecamp stays
+        // open. Catalog-backed rows remain owned by replaceCatalog().
+        const auto localIt = m_indexByKey.constFind(key(QString(), name));
+        if (localIt != m_indexByKey.constEnd()) {
+            Row& r = m_rows[localIt.value()];
+            QList<int> changedRoles;
+            const auto update = [&changedRoles](QString& field,
+                                                const QString& value,
+                                                int role) {
+                if (field == value) return;
+                field = value;
+                changedRoles.append(role);
+            };
+            update(r.displayName, pkg.value("displayName").toString(), DisplayNameRole);
+            update(r.description, pkg.value("description").toString(), DescriptionRole);
+            update(r.category, pkg.value("category").toString(), CategoryRole);
+            update(r.type, pkg.value("type").toString(), TypeRole);
+            if (!changedRoles.isEmpty()) {
+                const QModelIndex mi = index(localIt.value());
+                emit dataChanged(mi, mi, changedRoles);
+                if (changedRoles.contains(CategoryRole)) categoriesTouched = true;
+            }
+            continue;
+        }
+
+        // Catalog-backed rows are updated by replaceCatalog().
+        if (m_indicesByName.contains(name)) continue;
+
+        const int idx = m_rows.size();
+        beginInsertRows({}, idx, idx);
+        Row r;
+        r.name             = name;
+        r.repositoryUrl    = QString();
+        r.displayName      = pkg.value("displayName").toString();
+        r.description      = pkg.value("description").toString();
+        r.category         = pkg.value("category").toString();
+        r.type             = pkg.value("type").toString();
+        r.installedVersion = pkg.value("version").toString();
+        r.installedHash    = pkg.value("hashes").toMap().value("root").toString();
+        r.installType      = pkg.value("installType").toString();
+        // versions{} + empty latestVersion → recomputeInstallStatus lands on
+        // InstallStatus::Installed (installedVersion set + no release to
+        // compare against). HasUpdate stays false. Local-only rows expose no
+        // Install/Upgrade action.
+        recomputeVersionDerivedFields(r);
+        m_rows.append(std::move(r));
+        m_indexByKey.insert(key(QString(), name), idx);
+        m_indicesByName.insert(name, idx);
+        endInsertRows();
+
+        if (!m_rows.last().category.isEmpty()) categoriesTouched = true;
+    }
+    if (categoriesTouched) emit categoriesChanged();
 }
 
 // ── Mutation: on-disk state ────────────────────────────────────────────────

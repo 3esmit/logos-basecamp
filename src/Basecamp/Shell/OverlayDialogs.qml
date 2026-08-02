@@ -25,6 +25,10 @@ import Basecamp.Backend 1.0
 Item {
     id: root
 
+    // Stable handle for UI automation (doc-tests drive this layer through the
+    // QML inspector's findByProperty/callMethod).
+    objectName: "overlayDialogs"
+
     // True iff any dialog is currently visible. Drives input-blocking
     // (WA_TransparentForMouseEvents flip) on the hosting QQuickWidget
     // — see MainContainer::onOverlayActiveChanged.
@@ -32,7 +36,6 @@ Item {
                                   || unloadCascadeDialog.visible
                                   || uninstallCascadeDialog.visible
                                   || upgradeCascadeDialog.visible
-                                  || installConfirmDialog.visible
                                   || installGateDialog.visible
                                   || addApplicationDialog.visible
     property string sidebarTooltipText: ""
@@ -47,14 +50,22 @@ Item {
         property var displayNameLookup: function(name) { return backend.displayNameFor(name); }
     }
 
+    // Each dialog instance carries a mode-derived objectName (matching the
+    // button convention inside ConfirmationDialog) so UI automation can
+    // assert WHICH dialog is open via its `visible` property. Text-based
+    // assertions alone can't: the per-mode instances keep their constant
+    // titles — and whatever body text they last rendered — in the object
+    // tree even while closed.
     ConfirmationDialog {
         id: missingDepsDialog
+        objectName: "confirmationDialog.missingDeps"
         mode: "missingDeps"
         displayNameLookup: _dialogDeps.displayNameLookup
     }
 
     ConfirmationDialog {
         id: unloadCascadeDialog
+        objectName: "confirmationDialog.unloadCascade"
         mode: "unloadCascade"
         displayNameLookup: _dialogDeps.displayNameLookup
         onContinueClicked: (name) => backend.confirmUnloadCascade(name)
@@ -63,6 +74,7 @@ Item {
 
     ConfirmationDialog {
         id: uninstallCascadeDialog
+        objectName: "confirmationDialog.uninstallCascade"
         mode: "uninstallCascade"
         displayNameLookup: _dialogDeps.displayNameLookup
         onContinueClicked: (name) => backend.confirmUninstallCascade(name)
@@ -81,27 +93,21 @@ Item {
     // (UpgradeCascade vs UninstallCascade).
     ConfirmationDialog {
         id: upgradeCascadeDialog
+        objectName: "confirmationDialog.upgradeCascade"
         mode: "upgradeCascade"
         displayNameLookup: _dialogDeps.displayNameLookup
         onContinueClicked: (name) => backend.confirmUninstallCascade(name)
         onCancelClicked: (name) => backend.cancelPendingAction(name)
     }
 
-    ConfirmationDialog {
-        id: installConfirmDialog
-        mode: "installConfirm"
-        displayNameLookup: _dialogDeps.displayNameLookup
-        onContinueClicked: backend.confirmInstall()
-        onCancelClicked: backend.cancelInstall()
-    }
-
-    // Fresh catalog-install gate initiated by package_manager_ui (via the
-    // module's requestInstall). Distinct from installConfirmDialog (local-LGX
-    // inspect flow): confirm/cancel forward the decision back through the
-    // module gate so PMU downloads+installs (or aborts). Lists the resolved
-    // transitive dep changes so this is the single install confirmation.
+    // Install gate initiated by package_manager_ui (via the module's
+    // requestInstall) — the only install confirmation in the app, covering
+    // both catalog downloads and local .lgx picks. Confirm/cancel forward the
+    // decision back through the module gate so PMU installs (or aborts).
+    // Lists the resolved transitive dep changes.
     ConfirmationDialog {
         id: installGateDialog
+        objectName: "confirmationDialog.installGate"
         mode: "installGate"
         displayNameLookup: _dialogDeps.displayNameLookup
         onContinueClicked: (name) => backend.confirmInstallGate(name)
@@ -130,9 +136,10 @@ Item {
         parent: root
         text: root.sidebarTooltipText
         visible: text !== ""
+        delay: 0
         placement: LogosToolTip.Right
-        x: 68
-        y: root.sidebarTooltipY - height / 2
+        manualX: 68
+        manualY: root.sidebarTooltipY - height / 2
     }
 
 
@@ -177,12 +184,8 @@ Item {
                                                  depChanges);
         }
 
-        function onInstallConfirmationRequested(metadata) {
-            installConfirmDialog.openWithMetadata(metadata);
-        }
-
-        // Fresh catalog-install gate (package_manager_ui-initiated). releaseTag
-        // is the target version; depChanges is the resolved transitive set.
+        // Install gate (package_manager_ui-initiated). releaseTag is the
+        // target version; depChanges is the resolved transitive set.
         function onInstallGateConfirmationRequested(name, releaseTag, depChanges) {
             installGateDialog.openWithInstallGate(name, releaseTag, depChanges);
         }
