@@ -215,7 +215,8 @@ void UIPluginManager::loadUiModule(const QString& moduleName)
                 meta,
                 request.coreDependencies,
                 &request.verifiedAssetProducers,
-                &producerError)) {
+                &producerError,
+                &request.verifiedAssetProfileRelativeRoot)) {
             qWarning() << "Refusing ui_qml verified asset producer declaration for"
                        << moduleName << ":" << producerError;
             emit pluginLoadFailedNotice(moduleName, producerError);

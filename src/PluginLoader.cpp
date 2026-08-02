@@ -320,7 +320,10 @@ void PluginLoader::loadQmlView(const PluginLoadRequest& request,
             new VerifiedAssetImageProvider(
                 request.name,
                 VerifiedAssetImageProvider::producerPersistenceRoots(
-                    request.name, request.verifiedAssetProducers)));
+                    request.name,
+                    request.verifiedAssetProducers,
+                    {},
+                    request.verifiedAssetProfileRelativeRoot)));
         engine->setBaseUrl(QUrl::fromLocalFile(request.installDir + "/"));
     }
 
