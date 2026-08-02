@@ -191,6 +191,141 @@ test("module inspector: leaving and returning preserves loaded state", async (ap
   );
 });
 
+test("module interface: validates JSON arguments before invoking a method", async (app) => {
+  await openModuleInspector(app);
+
+  const moduleInspector = await app.findByProperty("objectName", "moduleInspectorView");
+  if (!moduleInspector.matches || moduleInspector.matches.length === 0) {
+    throw new Error("Module Inspector root was not found");
+  }
+  const moduleInspectorId = moduleInspector.matches[0].id;
+
+  await app.inspector.send("evaluate", {
+    objectId: moduleInspectorId,
+    expression: 'openInterface("package_manager")',
+  });
+
+  const interfaceView = await app.findByProperty("objectName", "coreModuleInterface");
+  if (!interfaceView.matches || interfaceView.matches.length === 0) {
+    throw new Error("Core Module Interface was not found");
+  }
+  const interfaceViewId = interfaceView.matches[0].id;
+
+  async function validate(expression) {
+    const serialized = (await app.inspector.send("evaluate", {
+      objectId: interfaceViewId,
+      expression: `JSON.stringify(${expression})`,
+    })).result;
+    return JSON.parse(serialized);
+  }
+
+  const zeroArgument = await validate('validateMethodArguments("[]", 0)');
+  if (!zeroArgument.valid || zeroArgument.argsJson !== "[]") {
+    throw new Error(`zero-argument validation failed: ${JSON.stringify(zeroArgument)}`);
+  }
+
+  const oneArgument = await validate('validateMethodArguments("[\\\"config\\\"]", 1)');
+  if (!oneArgument.valid || oneArgument.argsJson !== '["config"]') {
+    throw new Error(`one-argument validation failed: ${JSON.stringify(oneArgument)}`);
+  }
+
+  const malformed = await validate('validateMethodArguments("[", 1)');
+  if (malformed.valid || !malformed.error.includes("valid JSON")) {
+    throw new Error(`malformed arguments were accepted: ${JSON.stringify(malformed)}`);
+  }
+
+  const nonArray = await validate('validateMethodArguments("{\\\"config\\\":true}", 1)');
+  if (nonArray.valid || !nonArray.error.includes("JSON array")) {
+    throw new Error(`non-array arguments were accepted: ${JSON.stringify(nonArray)}`);
+  }
+
+  const wrongArity = await validate('validateMethodArguments("[]", 1)');
+  if (wrongArity.valid || !wrongArity.error.includes("1")) {
+    throw new Error(`wrong-arity arguments were accepted: ${JSON.stringify(wrongArity)}`);
+  }
+
+  const fourArguments = await validate('validateMethodArguments("[1,2,3,4]", 4)');
+  if (!fourArguments.valid || fourArguments.argsJson !== "[1,2,3,4]") {
+    throw new Error(`four-argument validation failed: ${JSON.stringify(fourArguments)}`);
+  }
+
+  const input = await app.findByProperty("objectName", "coreModuleArgumentInput.inspectPackage");
+  const callButton = await app.findByProperty("objectName", "coreModuleCallButton.inspectPackage");
+  const errorText = await app.findByProperty("objectName", "coreModuleArgumentError.inspectPackage");
+  if (!input.matches?.length || !callButton.matches?.length || !errorText.matches?.length) {
+    throw new Error("inspectPackage argument controls were not rendered");
+  }
+
+  await app.inspector.send("setProperty", {
+    objectId: input.matches[0].id,
+    property: "text",
+    value: "[",
+  });
+  await app.inspector.send("evaluate", {
+    objectId: callButton.matches[0].id,
+    expression: "click()",
+  });
+  await app.waitFor(async () => {
+    const properties = await app.getProperties(errorText.matches[0].id);
+    const text = properties.properties.find((property) => property.name === "text")?.value;
+    if (!String(text).includes("valid JSON")) {
+      throw new Error("invalid JSON was not surfaced inline");
+    }
+  }, { description: "inline argument validation error" });
+
+  await app.inspector.send("setProperty", {
+    objectId: input.matches[0].id,
+    property: "text",
+    value: '["/path/that/does/not/exist.lgx"]',
+  });
+  await app.inspector.send("evaluate", {
+    objectId: callButton.matches[0].id,
+    expression: "click()",
+  });
+  await app.waitFor(async () => {
+    const properties = await app.getProperties(interfaceViewId);
+    const resultText = properties.properties.find((property) => property.name === "resultText")?.value;
+    if (!String(resultText).includes("result")) {
+      throw new Error("valid arguments did not invoke the module method");
+    }
+  }, { timeout: 10000, description: "module method invocation result" });
+
+  const fourArgumentInput = await app.findByProperty(
+    "objectName", "coreModuleArgumentInput.requestInstall");
+  const fourArgumentCall = await app.findByProperty(
+    "objectName", "coreModuleCallButton.requestInstall");
+  if (!fourArgumentInput.matches?.length || !fourArgumentCall.matches?.length) {
+    throw new Error("four-argument requestInstall controls were not rendered");
+  }
+
+  await app.inspector.send("setProperty", {
+    objectId: interfaceViewId,
+    property: "resultText",
+    value: "",
+  });
+  await app.inspector.send("setProperty", {
+    objectId: fourArgumentInput.matches[0].id,
+    property: "text",
+    value: '["not-a-package", "0.0.0", "https://example.invalid/repository.json", "[]"]',
+  });
+  await app.inspector.send("evaluate", {
+    objectId: fourArgumentCall.matches[0].id,
+    expression: "click()",
+  });
+  await app.waitFor(async () => {
+    const properties = await app.getProperties(interfaceViewId);
+    const resultText = properties.properties.find((property) => property.name === "resultText")?.value;
+    if (!String(resultText).includes("result") || String(resultText).includes("Too many arguments")) {
+      throw new Error("four-argument module method was not dispatched");
+    }
+  }, { timeout: 10000, description: "four-argument module method invocation" });
+
+  await app.inspector.send("evaluate", {
+    objectId: moduleInspectorId,
+    expression: "showingInterface = false",
+  });
+});
+
 // --- Sidebar: sequential section opening ---
 //
 // Regression guard: opening multiple sidebar sections one after another

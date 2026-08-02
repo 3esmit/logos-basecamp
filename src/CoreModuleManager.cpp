@@ -285,18 +285,7 @@ QString CoreModuleManager::callModuleInstanceMethod(const QString& moduleName,
         args.append(val.toVariant());
     }
 
-    QVariant result;
-    if (args.isEmpty()) {
-        result = client->invokeRemoteMethod(moduleName, methodName);
-    } else if (args.size() == 1) {
-        result = client->invokeRemoteMethod(moduleName, methodName, args[0]);
-    } else if (args.size() == 2) {
-        result = client->invokeRemoteMethod(moduleName, methodName, args[0], args[1]);
-    } else if (args.size() == 3) {
-        result = client->invokeRemoteMethod(moduleName, methodName, args[0], args[1], args[2]);
-    } else {
-        return "{\"error\": \"Too many arguments\"}";
-    }
+    const QVariant result = client->invokeRemoteMethod(moduleName, methodName, args);
 
     QJsonObject wrapper;
     wrapper["result"] = variantToJsonValue(result);

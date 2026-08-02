@@ -6,13 +6,57 @@ import Logos.Controls
 
 Item {
     id: root
-    
+    objectName: "coreModuleInterface"
+
     property string pluginName: ""
     property var methods: []
     property var events: []
     property string resultText: ""
 
     signal backClicked()
+
+    function argumentCount(signature) {
+        const firstParenthesis = signature.indexOf("(")
+        const lastParenthesis = signature.lastIndexOf(")")
+        if (firstParenthesis < 0 || lastParenthesis <= firstParenthesis) {
+            return -1
+        }
+
+        const parameters = signature.slice(firstParenthesis + 1, lastParenthesis).trim()
+        return parameters.length === 0 ? 0 : parameters.split(",").length
+    }
+
+    function validateMethodArguments(argumentsJson, expectedArgumentCount) {
+        let argumentsValue
+        try {
+            argumentsValue = JSON.parse(argumentsJson)
+        } catch (error) {
+            return {
+                valid: false,
+                error: qsTr("Arguments must be valid JSON.")
+            }
+        }
+
+        if (!Array.isArray(argumentsValue)) {
+            return {
+                valid: false,
+                error: qsTr("Arguments must be a JSON array.")
+            }
+        }
+
+        if (expectedArgumentCount >= 0 && argumentsValue.length !== expectedArgumentCount) {
+            return {
+                valid: false,
+                error: qsTr("Expected %1 argument(s).").arg(expectedArgumentCount)
+            }
+        }
+
+        return {
+            valid: true,
+            argsJson: JSON.stringify(argumentsValue),
+            error: ""
+        }
+    }
 
     Component.onCompleted: { loadMethods(); loadEvents() }
     onPluginNameChanged: { loadMethods(); loadEvents() }
@@ -128,10 +172,16 @@ Item {
                             model: root.methods
 
                             Rectangle {
+                                id: methodCard
                                 Layout.fillWidth: true
                                 Layout.preferredHeight: methodColumn.implicitHeight + 24
                                 color: "#363636"
                                 radius: 6
+
+                                readonly property string methodName: modelData.name || modelData
+                                readonly property int expectedArgumentCount:
+                                    root.argumentCount(modelData.signature || "")
+                                property string argumentError: ""
 
                                 ColumnLayout {
                                     id: methodColumn
@@ -144,7 +194,7 @@ Item {
                                         spacing: 12
 
                                         LogosText {
-                                            text: modelData.name || modelData
+                                            text: methodCard.methodName
                                             font.weight: Font.Bold
                                             color: "#4A90E2"
                                         }
@@ -157,10 +207,70 @@ Item {
                                         }
 
                                         Item { Layout.fillWidth: true }
+                                    }
+
+                                    LogosText {
+                                        text: modelData.description || ""
+                                        font.pixelSize: Theme.typography.secondaryText
+                                        color: "#a0a0a0"
+                                        wrapMode: Text.Wrap
+                                        Layout.fillWidth: true
+                                        visible: modelData.description !== undefined && modelData.description.length > 0
+                                    }
+
+                                    LogosText {
+                                        text: qsTr("Arguments (JSON array)")
+                                        font.pixelSize: Theme.typography.secondaryText
+                                        font.weight: Font.Bold
+                                        color: "#a0a0a0"
+                                        visible: methodCard.expectedArgumentCount !== 0
+                                    }
+
+                                    TextArea {
+                                        id: argumentsInput
+                                        objectName: "coreModuleArgumentInput." + methodCard.methodName
+                                        Layout.fillWidth: true
+                                        Layout.preferredHeight: 64
+                                        visible: methodCard.expectedArgumentCount !== 0
+                                        text: "[]"
+                                        placeholderText: methodCard.expectedArgumentCount > 0
+                                            ? qsTr("Enter a JSON array with %1 item(s).").arg(methodCard.expectedArgumentCount)
+                                            : qsTr("[]")
+                                        selectByMouse: true
+                                        wrapMode: Text.Wrap
+                                        color: "#ffffff"
+                                        font.family: Theme.typography.publicSans
+                                        font.pixelSize: Theme.typography.secondaryText
+
+                                        background: Rectangle {
+                                            color: "#1e1e1e"
+                                            radius: 4
+                                            border.color: "#4d4d4d"
+                                            border.width: 1
+                                        }
+
+                                        onTextChanged: methodCard.argumentError = ""
+                                    }
+
+                                    LogosText {
+                                        objectName: "coreModuleArgumentError." + methodCard.methodName
+                                        Layout.fillWidth: true
+                                        text: methodCard.argumentError
+                                        font.pixelSize: Theme.typography.secondaryText
+                                        color: "#e57373"
+                                        wrapMode: Text.Wrap
+                                        visible: methodCard.argumentError.length > 0
+                                    }
+
+                                    RowLayout {
+                                        Layout.fillWidth: true
+
+                                        Item { Layout.fillWidth: true }
 
                                         Button {
-                                            text: "Call"
-                                            
+                                            objectName: "coreModuleCallButton." + methodCard.methodName
+                                            text: qsTr("Call")
+
                                             contentItem: LogosText {
                                                 text: parent.text
                                                 font.pixelSize: Theme.typography.secondaryText
@@ -177,19 +287,21 @@ Item {
                                             }
 
                                             onClicked: {
-                                                let methodName = modelData.name || modelData
-                                                root.resultText = backend.callCoreModuleMethod(root.pluginName, methodName, "[]")
+                                                const validation = root.validateMethodArguments(
+                                                    argumentsInput.text,
+                                                    methodCard.expectedArgumentCount)
+                                                if (!validation.valid) {
+                                                    methodCard.argumentError = validation.error
+                                                    return
+                                                }
+
+                                                methodCard.argumentError = ""
+                                                root.resultText = backend.callCoreModuleMethod(
+                                                    root.pluginName,
+                                                    methodCard.methodName,
+                                                    validation.argsJson)
                                             }
                                         }
-                                    }
-
-                                    LogosText {
-                                        text: modelData.description || ""
-                                        font.pixelSize: Theme.typography.secondaryText
-                                        color: "#a0a0a0"
-                                        wrapMode: Text.Wrap
-                                        Layout.fillWidth: true
-                                        visible: modelData.description !== undefined && modelData.description.length > 0
                                     }
                                 }
                             }
@@ -309,6 +421,4 @@ Item {
         }
     }
 }
-
-
 
