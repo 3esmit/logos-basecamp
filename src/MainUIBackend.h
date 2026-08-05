@@ -210,6 +210,7 @@ signals:
     void catalogInstallStageChanged(const QString& name, InstallStage::Value stage);
     void catalogInstallFinished(const QString& name);
     void catalogInstallFailed(const QString& name, const QString& error);
+    void coreModuleLoadFailedNotice(const QString& name, const QString& error);
     void launcherAppsChanged();
     void currentVisibleAppChanged();
     void loadingModulesChanged();

@@ -36,6 +36,10 @@ Rectangle {
         repositoriesView.reportOperationResult(operation, url, success, error)
     }
 
+    function reportModuleLoadFailure(name, error) {
+        moduleInspectorView.reportLoadFailure(name, error)
+    }
+
     function showRepositories() { d.selectedIndex = d.sectionRepositories }
 
     QtObject {
@@ -201,6 +205,7 @@ Rectangle {
 
                     // 2 — Module Inspector (core modules).
                     ModuleInspectorView {
+                        id: moduleInspectorView
                         sourceModel: root.coreModulesModel
                         loading:     root.modulesLoading
                         searchText:  d.searchText

@@ -36,6 +36,14 @@ Item {
     signal loadRequested(string name)
     signal unloadRequested(string name)
 
+    property string loadErrorText: ""
+
+    function reportLoadFailure(name, error) {
+        loadErrorText = error.length > 0
+                      ? error
+                      : qsTr("Could not load '%1'. Check the installed package and dependencies.").arg(name)
+    }
+
     property string selectedPlugin: ""
     property bool showingInterface: false
 
@@ -84,6 +92,37 @@ Item {
                 totalCount: tableModel.totalCount
 
                 onReloadClicked: root.reloadRequested()
+            }
+
+            Rectangle {
+                objectName: "moduleInspector.loadError"
+                Layout.fillWidth: true
+                Layout.leftMargin: Theme.spacing.large
+                Layout.rightMargin: Theme.spacing.large
+                visible: root.loadErrorText.length > 0
+                implicitHeight: visible ? errorRow.implicitHeight + Theme.spacing.medium * 2 : 0
+                color: Theme.colors.getColor(Theme.palette.error, 0.12)
+                radius: Theme.spacing.radiusLarge
+
+                RowLayout {
+                    id: errorRow
+                    anchors.fill: parent
+                    anchors.margins: Theme.spacing.medium
+                    spacing: Theme.spacing.small
+
+                    LogosText {
+                        Layout.fillWidth: true
+                        text: root.loadErrorText
+                        color: Theme.palette.error
+                        wrapMode: Text.Wrap
+                    }
+
+                    LogosButton {
+                        text: qsTr("Dismiss")
+                        variant: LogosButton.Variant.Secondary
+                        onClicked: root.loadErrorText = ""
+                    }
+                }
             }
 
             LogosTable {
@@ -238,6 +277,7 @@ Item {
                             interfaceEnabled: true
 
                             onLoadToggleRequested: {
+                                root.loadErrorText = ""
                                 if (rowItem.isLoaded) root.unloadRequested(rowItem.name)
                                 else                 root.loadRequested(rowItem.name)
                             }

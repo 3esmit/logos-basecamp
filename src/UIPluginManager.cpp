@@ -434,7 +434,13 @@ void UIPluginManager::loadCoreModule(const QString& moduleName)
             qDebug() << "Successfully loaded core module:" << moduleName;
             emit coreModulesChanged();
         } else {
-            qDebug() << "Failed to load core module:" << moduleName;
+            const QString error = QStringLiteral(
+                "Could not load '%1'. The installed module may be incompatible "
+                "with this Basecamp version or a dependency may be missing. "
+                "Install a compatible module release and try again.")
+                .arg(moduleName);
+            qWarning() << "Failed to load core module:" << moduleName << ":" << error;
+            emit coreModuleLoadFailedNotice(moduleName, error);
         }
     }, Qt::QueuedConnection);
 }
