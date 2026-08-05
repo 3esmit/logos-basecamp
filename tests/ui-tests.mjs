@@ -165,6 +165,38 @@ test("module inspector: loaded modules render CPU and memory stats", async (app)
   );
 });
 
+test("module inspector: failed loads surface an actionable error", async (app) => {
+  await openModuleInspector(app);
+
+  const moduleInspector = await app.findByProperty("objectName", "moduleInspectorView");
+  if (!moduleInspector.matches?.length) {
+    throw new Error("Module Inspector root was not found");
+  }
+
+  const moduleInspectorId = moduleInspector.matches[0].id;
+  await app.inspector.send("evaluate", {
+    objectId: moduleInspectorId,
+    expression: 'reportLoadFailure("blockchain_module", "The installed module is incompatible with this Basecamp version.")',
+  });
+
+  const errorBanner = await app.findByProperty("objectName", "moduleInspector.loadError");
+  if (!errorBanner.matches?.length) {
+    throw new Error("Module load error banner was not found");
+  }
+
+  await app.waitFor(async () => {
+    const properties = await app.getProperties(errorBanner.matches[0].id);
+    const visible = properties.properties.find((property) => property.name === "visible")?.value;
+    if (visible !== true) {
+      throw new Error("Module load error banner is not visible");
+    }
+    const tree = await app.getTree({ depth: 40 });
+    if (!JSON.stringify(tree).includes("incompatible")) {
+      throw new Error("Actionable module compatibility error was not rendered");
+    }
+  }, { timeout: 5000, interval: 250, description: "module load error to render" });
+});
+
 test("module inspector: leaving and returning preserves loaded state", async (app) => {
   // Navigate to Settings → Module Inspector and wait for loaded modules.
   await openModuleInspector(app);

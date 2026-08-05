@@ -141,6 +141,11 @@ signals:
     // failure to the QML overlay instead of only logging it.
     void pluginLoadFailedNotice(const QString& name, const QString& error);
 
+    // Core-module loads are initiated from the Module Inspector rather than
+    // the UI-plugin loader. Keep their failure path equally visible so an
+    // incompatible package cannot leave the row silently at "Not loaded".
+    void coreModuleLoadFailedNotice(const QString& name, const QString& error);
+
     // Forwarded from the package_manager_ui replica's navigateToRepositoriesRequested
     // signal. MainUIBackend re-emits it so ContentViews.qml can route to
     // Settings → Repositories without touching the QtRO replica directly.

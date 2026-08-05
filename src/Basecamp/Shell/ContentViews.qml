@@ -23,6 +23,9 @@ Item {
             backend.setCurrentActiveSectionIndex(root.sidebarSettings)
             settingsView.showRepositories()
         }
+        function onCoreModuleLoadFailedNotice(name, error) {
+            settingsView.reportModuleLoadFailure(name, error)
+        }
     }
 
     Rectangle {
@@ -92,4 +95,3 @@ Item {
         }
     }
 }
-
