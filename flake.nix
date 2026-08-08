@@ -5,16 +5,16 @@
     logos-nix.url = "github:logos-co/logos-nix";
     # Follow the same nixpkgs as logos-nix
     nixpkgs.follows = "logos-nix/nixpkgs";
-    logos-cpp-sdk.url = "github:3esmit/logos-cpp-sdk/4726bd0e5d74dccdbfd966733b21590d553a3c68";
+    logos-cpp-sdk.url = "github:3esmit/logos-cpp-sdk/ec020bd06776a71b204406384db2b194001bc543";
     logos-cpp-sdk.inputs.logos-protocol.follows = "logos-protocol";
     logos-protocol = {
       # Inspector uses scoped C clients for independently managed module
       # instances, so Basecamp must expose the same published protocol ABI.
-      url = "github:3esmit/logos-protocol/6f75e612d7ed71510a9f9a84f36ede2fe687d1fe";
+      url = "github:3esmit/logos-protocol/6086c922bf27ea53e073e92c997421c6e91baacd";
       inputs.logos-nix.follows = "logos-nix";
     };
     logos-qt-sdk = {
-      url = "github:3esmit/logos-qt-sdk";
+      url = "github:3esmit/logos-qt-sdk/67fac90bde3473d43c48483880492f024ad167e1";
       inputs.logos-nix.follows = "logos-nix";
       inputs.logos-protocol.follows = "logos-protocol";
       inputs.logos-cpp-sdk.follows = "logos-cpp-sdk";
