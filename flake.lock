@@ -15783,17 +15783,17 @@
         ]
       },
       "locked": {
-        "lastModified": 1785528309,
-        "narHash": "sha256-dz/zZVFwHsM8zvkfuWOm9x9J2b+ridUbvS1IIc876ZQ=",
+        "lastModified": 1786212977,
+        "narHash": "sha256-hAR1ltNmQnL5QZF1nhWuEZVH9EikV0G2obYzWkMVx/I=",
         "owner": "3esmit",
         "repo": "logos-cpp-sdk",
-        "rev": "8c3d7d4253bdf2f9b2e4a9a3faaff6c1772fc1d8",
+        "rev": "4726bd0e5d74dccdbfd966733b21590d553a3c68",
         "type": "github"
       },
       "original": {
         "owner": "3esmit",
         "repo": "logos-cpp-sdk",
-        "rev": "8c3d7d4253bdf2f9b2e4a9a3faaff6c1772fc1d8",
+        "rev": "4726bd0e5d74dccdbfd966733b21590d553a3c68",
         "type": "github"
       }
     },
