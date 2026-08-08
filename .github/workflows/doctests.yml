@@ -140,7 +140,7 @@ jobs:
         shell: bash
         run: |
           mkdir -p "$RUNNER_TEMP/basecamp-doctests"
-          for spec in basecamp-modules basecamp-modules-bundle basecamp-fullapi-ui basecamp-fullapi-ui-qml basecamp-shortcut-bridge basecamp-package-lifecycle; do
+          for spec in basecamp-modules basecamp-modules-bundle basecamp-fullapi-ui basecamp-fullapi-ui-qml basecamp-shortcut-bridge basecamp-package-lifecycle basecamp-missing-deps basecamp-persistence; do
             sed "s#github:logos-co/logos-basecamp{release}#github:${BASECAMP_REPOSITORY}{release}#g" \
               "doctests/${spec}.test.yaml" \
               > "$RUNNER_TEMP/basecamp-doctests/${spec}.test.yaml"
@@ -175,6 +175,17 @@ jobs:
           #   basecamp-package-lifecycle — installs, upgrades (0.1.1 → 0.2.1),
           #     and uninstalls a hand-crafted local .lgx through the bundle's
           #     real confirmation dialogs (hermetic — no catalog packages are downloaded or installed).
+          #   basecamp-missing-deps — seeds an installed ui_qml app whose
+          #     core-module dependency exists nowhere, then asserts the sidebar
+          #     red-cross marker and the Missing Dependencies dialog raised by
+          #     the load gate (hermetic: hand-written user-dir fixture).
+          #   basecamp-persistence — installs a hand-crafted local .lgx through
+          #     the install gate, then relaunches the bundle against the same
+          #     user-dir and asserts the app is rediscovered from disk alone;
+          #     a third launch runs a store-free copy of the bundle against a
+          #     moved user-dir and asserts true portability (zero /nix/store
+          #     refs in dynamic-link metadata, app + module still loadable)
+          #     (hermetic — no catalog packages are downloaded or installed).
           nix run github:logos-co/logos-doctest -- run \
             "$RUNNER_TEMP/basecamp-doctests/basecamp-modules.test.yaml" \
             "$RUNNER_TEMP/basecamp-doctests/basecamp-modules-bundle.test.yaml" \
@@ -182,6 +193,8 @@ jobs:
             "$RUNNER_TEMP/basecamp-doctests/basecamp-fullapi-ui-qml.test.yaml" \
             "$RUNNER_TEMP/basecamp-doctests/basecamp-shortcut-bridge.test.yaml" \
             "$RUNNER_TEMP/basecamp-doctests/basecamp-package-lifecycle.test.yaml" \
+            "$RUNNER_TEMP/basecamp-doctests/basecamp-missing-deps.test.yaml" \
+            "$RUNNER_TEMP/basecamp-doctests/basecamp-persistence.test.yaml" \
             --verbose \
             --continue-on-fail \
             --release-for logos-basecamp=${{ steps.source.outputs.sha }} \
@@ -209,7 +222,7 @@ jobs:
 
       - name: Verify markdown generation
         run: |
-          for spec in basecamp-modules basecamp-modules-bundle basecamp-fullapi-ui basecamp-fullapi-ui-qml basecamp-shortcut-bridge basecamp-package-lifecycle; do
+          for spec in basecamp-modules basecamp-modules-bundle basecamp-fullapi-ui basecamp-fullapi-ui-qml basecamp-shortcut-bridge basecamp-package-lifecycle basecamp-missing-deps basecamp-persistence; do
             nix run github:logos-co/logos-doctest -- generate \
               "${{ runner.temp }}/basecamp-doctests/${spec}.test.yaml" \
               --release-for logos-basecamp=${{ steps.source.outputs.sha }} \
