@@ -5,7 +5,7 @@
     logos-nix.url = "github:logos-co/logos-nix";
     # Follow the same nixpkgs as logos-nix
     nixpkgs.follows = "logos-nix/nixpkgs";
-    logos-cpp-sdk.url = "github:logos-co/logos-cpp-sdk";
+    logos-cpp-sdk.url = "github:3esmit/logos-cpp-sdk/8c3d7d4253bdf2f9b2e4a9a3faaff6c1772fc1d8";
     logos-cpp-sdk.inputs.logos-protocol.follows = "logos-protocol";
     logos-protocol = {
       # Inspector uses scoped C clients for independently managed module
