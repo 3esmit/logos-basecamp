@@ -131,6 +131,61 @@ test("module inspector: auto-loaded modules show as Loaded with Unload action", 
   );
 });
 
+test("module inspector: core module rows and actions expose package identity", async (app) => {
+  await openModuleInspector(app);
+
+  await app.waitFor(
+    async () => { await app.expectTexts(["Package Manager", "Loaded", "Unload", "Interface"]); },
+    { timeout: 10000, interval: 500, description: "Package Manager actions to render" }
+  );
+
+  async function accessibleProperty(objectName, expression) {
+    const result = await app.findByProperty("objectName", objectName);
+    if (!result.matches?.length) {
+      throw new Error(`Accessible control not found: ${objectName}`);
+    }
+    const response = await app.inspector.send("evaluate", {
+      objectId: result.matches[0].id,
+      expression,
+    });
+    if (response.error) {
+      throw new Error(`Could not evaluate ${objectName}: ${response.error}`);
+    }
+    return response.result;
+  }
+
+  const unloadName = await accessibleProperty(
+    "moduleRow.loadToggle.package_manager", "Accessible.name");
+  if (unloadName !== "Unload Package Manager") {
+    throw new Error(`Unexpected accessible unload name: ${JSON.stringify(unloadName)}`);
+  }
+
+  const unloadDescription = await accessibleProperty(
+    "moduleRow.loadToggle.package_manager", "Accessible.description");
+  if (unloadDescription !== "Module package: package_manager") {
+    throw new Error(`Unexpected accessible unload description: ${JSON.stringify(unloadDescription)}`);
+  }
+
+  const interfaceName = await accessibleProperty(
+    "moduleRow.interface.package_manager", "Accessible.name");
+  if (interfaceName !== "Interface Package Manager") {
+    throw new Error(`Unexpected accessible interface name: ${JSON.stringify(interfaceName)}`);
+  }
+
+  // Exercise the same static action-name helper with the unloaded label
+  // without changing any live delegate bindings.
+  const loadResult = await accessibleProperty(
+    "moduleRow.loadToggle.package_manager",
+    'JSON.stringify({ name: parent.accessibleActionName("Load"), '
+      + 'description: parent.accessibleActionDescription() })'
+  );
+  const load = JSON.parse(loadResult);
+  if (load.name !== "Load Package Manager"
+      || load.description !== "Module package: package_manager") {
+    throw new Error(`Unexpected accessible load state: ${loadResult}`);
+  }
+});
+
 test("module inspector: loaded modules render CPU and memory stats", async (app) => {
   await openModuleInspector(app);
 
