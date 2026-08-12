@@ -20,10 +20,31 @@ RowLayout {
     property bool interfaceEnabled: false
     property bool busy: false
 
+    // `label` is the human-readable package name shown in the table; `name`
+    // remains available in the accessible description as the stable package
+    // identifier when those differ.
+    readonly property string accessibleModuleLabel:
+        root.row && root.row.label ? String(root.row.label) :
+        (root.row && root.row.name ? String(root.row.name) : "")
+    readonly property string accessibleModuleName:
+        root.row && root.row.name ? String(root.row.name) : ""
+
     signal loadToggleRequested()
     signal interfaceRequested()
 
     spacing: Theme.spacing.small
+
+    function accessibleActionName(action) {
+        return root.accessibleModuleLabel.length > 0
+            ? qsTr("%1 %2").arg(action).arg(root.accessibleModuleLabel)
+            : action
+    }
+
+    function accessibleActionDescription() {
+        return root.accessibleModuleName.length > 0
+            ? qsTr("Module package: %1").arg(root.accessibleModuleName)
+            : ""
+    }
 
     LogosButton {
         // Automation-only: per-module handle so UI tests can click one row's
@@ -35,17 +56,24 @@ RowLayout {
         visible: root.row && !root.row.isMainUi
         enabled: !root.busy
         text: root.row && root.row.isLoaded ? qsTr("Unload") : qsTr("Load")
+        Accessible.name: root.accessibleActionName(text)
+        Accessible.description: root.accessibleActionDescription()
         variant: root.row && root.row.isLoaded ? LogosButton.Variant.Secondary
                                               : LogosButton.Variant.Primary
         onClicked: root.loadToggleRequested()
     }
 
     LogosButton {
+        // Keep this handle aligned with the load toggle so accessibility and
+        // UI automation can address the interface action by module.
+        objectName: "moduleRow.interface." + (root.row && root.row.name ? root.row.name : "")
         Layout.preferredWidth: 100
         Layout.preferredHeight: 40
         radius: Theme.spacing.radiusLarge
         visible: root.interfaceEnabled && root.row && root.row.isLoaded
         text: qsTr("Interface")
+        Accessible.name: root.accessibleActionName(text)
+        Accessible.description: root.accessibleActionDescription()
         onClicked: root.interfaceRequested()
     }
 }
