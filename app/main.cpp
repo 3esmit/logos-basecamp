@@ -266,9 +266,14 @@ int main(int argc, char *argv[])
     auto mainWindow = std::make_unique<Window>(&logosAPI);
 
 #ifdef ENABLE_QML_INSPECTOR
-    // Start the inspector before showing the window so clients can connect
-    // while platform-specific window and QML rendering initialization runs.
-    InspectorServer::attach(mainWindow.get());
+    // Smoke checks only validate startup and run without an inspector client.
+    // Keep the server out of that path because platform-specific offscreen
+    // initialization can otherwise crash before the check completes.
+    if (!smokeCheck) {
+        // Start the inspector before showing the window so clients can connect
+        // while platform-specific window and QML rendering initialization runs.
+        InspectorServer::attach(mainWindow.get());
+    }
 #endif
 
     mainWindow->show();
