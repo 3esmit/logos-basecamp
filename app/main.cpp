@@ -262,18 +262,27 @@ int main(int argc, char *argv[])
     installUnixSignalHandlers(app);
 #endif
 
+#ifdef ENABLE_QML_INSPECTOR
+    // Smoke checks only validate startup and run without an inspector client.
+    // Keep the server out of that path because platform-specific offscreen
+    // initialization can otherwise crash before the check completes.
+    InspectorServer* inspector = nullptr;
+    if (!smokeCheck) {
+        // Start before constructing the window. Main UI setup can perform
+        // synchronous module work on a cold portable launch; the test harness
+        // must be able to connect while that work is still in progress.
+        inspector = InspectorServer::attach(nullptr);
+    }
+#endif
+
     // Create and show the main window. Heap-allocated so we can control
     // destruction ordering explicitly during shutdown (see below).
     auto mainWindow = std::make_unique<Window>(&logosAPI);
 
 #ifdef ENABLE_QML_INSPECTOR
-    // Smoke checks only validate startup and run without an inspector client.
-    // Keep the server out of that path because platform-specific offscreen
-    // initialization can otherwise crash before the check completes.
-    if (!smokeCheck) {
-        // Start the inspector before showing the window so clients can connect
-        // while platform-specific window and QML rendering initialization runs.
-        InspectorServer::attach(mainWindow.get());
+    if (inspector) {
+        inspector->setRootWidget(mainWindow.get());
+        inspector->setParent(mainWindow.get());
     }
 #endif
 
