@@ -278,6 +278,10 @@ private:
     // session.
     void subscribeToPackageInstallationEvents();
 
+    // Complete package-manager startup wiring once async setup has populated
+    // the cached replica. Qt Remote Objects can stall on a fresh acquisition.
+    void subscribeToPackageManagerEvents();
+
     // Subscribe to package_downloader's catalogChanged event
     void subscribeToPackageDownloaderEvents();
 
@@ -403,6 +407,7 @@ private:
     // idempotent, and keep the "not loaded" warning to one line rather than one
     // per stats-timer tick.
     bool m_packageManagerSubscribed = false;
+    bool m_packageManagerSetupStarted = false;
     bool m_packageDownloaderSubscribed = false;
     bool m_warnedPackageManagerMissing = false;
     bool m_warnedPackageDownloaderMissing = false;

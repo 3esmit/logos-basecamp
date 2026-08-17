@@ -6,23 +6,23 @@
     # Follow the same nixpkgs as logos-nix
     nixpkgs.follows = "logos-nix/nixpkgs";
     logos-cpp-sdk.url = "github:3esmit/logos-cpp-sdk/ec020bd06776a71b204406384db2b194001bc543";
-    logos-cpp-sdk.inputs.logos-protocol.url = "github:3esmit/logos-protocol/819ad7f7b264c7c73e528cb859063619690a0279";
+    logos-cpp-sdk.inputs.logos-protocol.url = "github:3esmit/logos-protocol/46d04ea6f160c44e8c84270cf7c3a4adec2029f0";
     logos-protocol = {
       # Inspector uses scoped C clients for independently managed module
       # instances, so Basecamp must expose the same published protocol ABI.
-      url = "github:3esmit/logos-protocol/819ad7f7b264c7c73e528cb859063619690a0279";
+      url = "github:3esmit/logos-protocol/46d04ea6f160c44e8c84270cf7c3a4adec2029f0";
       inputs.logos-nix.follows = "logos-nix";
     };
     logos-qt-sdk = {
       url = "github:3esmit/logos-qt-sdk/67fac90bde3473d43c48483880492f024ad167e1";
       inputs.logos-nix.follows = "logos-nix";
-      inputs.logos-protocol.url = "github:3esmit/logos-protocol/819ad7f7b264c7c73e528cb859063619690a0279";
+      inputs.logos-protocol.url = "github:3esmit/logos-protocol/46d04ea6f160c44e8c84270cf7c3a4adec2029f0";
       inputs.logos-cpp-sdk.follows = "logos-cpp-sdk";
     };
     logos-module-builder = {
       url = "github:3esmit/logos-module-builder/324b459c3f7b59171d249f3ccbcc362403b3fcaf";
       inputs.logos-cpp-sdk.follows = "logos-cpp-sdk";
-      inputs.logos-protocol.url = "github:3esmit/logos-protocol/819ad7f7b264c7c73e528cb859063619690a0279";
+      inputs.logos-protocol.url = "github:3esmit/logos-protocol/46d04ea6f160c44e8c84270cf7c3a4adec2029f0";
       inputs.logos-qt-sdk.follows = "logos-qt-sdk";
     };
     logos-module.url = "github:logos-co/logos-module";

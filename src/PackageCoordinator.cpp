@@ -97,13 +97,9 @@ bool smokeCheckActive()
 
 void PackageCoordinator::subscribeToPackageInstallationEvents()
 {
-    if (!m_logosAPI || smokeCheckActive()) {
-        return;
-    }
+    if (!m_logosAPI || smokeCheckActive()) return;
+    if (m_packageManagerSubscribed || m_packageManagerSetupStarted) return;
 
-    if (m_packageManagerSubscribed) {
-        return;
-    }
     if (!moduleIsLoaded(m_coreModuleManager, "package_manager")) {
         if (!m_warnedPackageManagerMissing) {
             m_warnedPackageManagerMissing = true;
@@ -113,27 +109,67 @@ void PackageCoordinator::subscribeToPackageInstallationEvents()
         }
         return;
     }
-    m_packageManagerSubscribed = true;
 
-    // Finish wiring the coordinator after construction has returned to the
-    // event loop. The directory calls use the async API: synchronous QtRO
-    // calls can re-enter the QML object graph on macOS and crash during cold
-    // startup.
+    m_packageManagerSetupStarted = true;
     QTimer::singleShot(0, this, [this]() {
-    LogosModules logos(m_logosAPI);
+        if (!m_logosAPI || smokeCheckActive()) return;
 
-    // Configure the package_manager module's directories so it knows where
-    // to install.
-    logos.package_manager.setEmbeddedModulesDirectoryAsync(
-        LogosBasecampPaths::embeddedModulesDirectory(), []() {});
-    logos.package_manager.setUserModulesDirectoryAsync(
-        LogosBasecampPaths::modulesDirectory(), []() {});
-    logos.package_manager.setEmbeddedUiPluginsDirectoryAsync(
-        LogosBasecampPaths::embeddedPluginsDirectory(), []() {});
-    logos.package_manager.setUserUiPluginsDirectoryAsync(
-        LogosBasecampPaths::pluginsDirectory(), []() {});
+        LogosModules logos(m_logosAPI);
+        logos.package_manager.setEmbeddedModulesDirectoryAsync(
+            LogosBasecampPaths::embeddedModulesDirectory(), []() {});
+        logos.package_manager.setUserModulesDirectoryAsync(
+            LogosBasecampPaths::modulesDirectory(), []() {});
+        logos.package_manager.setEmbeddedUiPluginsDirectoryAsync(
+            LogosBasecampPaths::embeddedPluginsDirectory(), []() {});
+        logos.package_manager.setUserUiPluginsDirectoryAsync(
+            LogosBasecampPaths::pluginsDirectory(), []() {});
 
-    logos.package_manager.on("corePluginFileInstalled", [this](const QVariantList& data) {
+        QTimer::singleShot(0, this, [this]() {
+            subscribeToPackageManagerEvents();
+        });
+    });
+}
+
+void PackageCoordinator::subscribeToPackageManagerEvents()
+{
+    if (!m_logosAPI || smokeCheckActive()) {
+        return;
+    }
+
+    if (m_packageManagerSubscribed) return;
+    if (!moduleIsLoaded(m_coreModuleManager, "package_manager")) {
+        if (!m_warnedPackageManagerMissing) {
+            m_warnedPackageManagerMissing = true;
+            qWarning() << "PackageCoordinator: package_manager is not loaded -- skipping its "
+                          "directory setup and event subscriptions. Package management is "
+                          "unavailable until it loads; this will be retried automatically.";
+        }
+        return;
+    }
+
+    LogosAPIClient* client = m_logosAPI->getClient("package_manager");
+    LogosObject* replica = client->cachedObject("package_manager");
+    if (!replica) {
+        // Async method calls populate the client's cache. Never acquire a new
+        // QtRO replica here: that operation can block the GUI thread during
+        // cold startup. Retry without transport I/O until the cache exists.
+        QTimer::singleShot(100, this, [this]() {
+            subscribeToPackageManagerEvents();
+        });
+        return;
+    }
+
+    m_packageManagerSubscribed = true;
+    auto subscribe = [client, replica](const QString& eventName,
+                                       std::function<void(const QVariantList&)> callback) {
+        client->onEvent(replica, eventName,
+                        [callback = std::move(callback)](const QString&,
+                                                         const QVariantList& data) {
+                            callback(data);
+                        });
+    };
+
+    subscribe(QStringLiteral("corePluginFileInstalled"), [this](const QVariantList& data) {
         if (data.isEmpty()) return;
         qDebug() << "Core module file installed:" << data[0].toString();
         QTimer::singleShot(100, this, [this]() {
@@ -145,7 +181,7 @@ void PackageCoordinator::subscribeToPackageInstallationEvents()
         });
     });
 
-    logos.package_manager.on("uiPluginFileInstalled", [this](const QVariantList& data) {
+    subscribe(QStringLiteral("uiPluginFileInstalled"), [this](const QVariantList& data) {
         if (data.isEmpty()) return;
         qDebug() << "UI plugin file installed:" << data[0].toString();
         QTimer::singleShot(100, this, [this]() {
@@ -158,7 +194,7 @@ void PackageCoordinator::subscribeToPackageInstallationEvents()
     // satisfied UI dep go missing, and a UI uninstall flat-out removes the
     // plugin from UIPluginManager's metadata. The 100ms settle matches
     // install to absorb rapid batched events.
-    logos.package_manager.on("corePluginUninstalled", [this](const QVariantList& data) {
+    subscribe(QStringLiteral("corePluginUninstalled"), [this](const QVariantList& data) {
         if (data.isEmpty()) return;
         qDebug() << "Core module uninstalled:" << data[0].toString();
         QTimer::singleShot(100, this, [this]() {
@@ -167,7 +203,7 @@ void PackageCoordinator::subscribeToPackageInstallationEvents()
         });
     });
 
-    logos.package_manager.on("uiPluginUninstalled", [this](const QVariantList& data) {
+    subscribe(QStringLiteral("uiPluginUninstalled"), [this](const QVariantList& data) {
         if (data.isEmpty()) return;
         qDebug() << "UI plugin uninstalled:" << data[0].toString();
         QTimer::singleShot(100, this, [this]() {
@@ -180,6 +216,7 @@ void PackageCoordinator::subscribeToPackageInstallationEvents()
     // (it's non-persistent but survives our process death since it lives in
     // package_manager's process); without this reset, the first request after
     // a crash would get rejected with "another X is in progress".
+    LogosModules logos(m_logosAPI);
     logos.package_manager.resetPendingActionAsync([](QVariantMap){});
 
     // Gated uninstall/upgrade events. package_manager emits these BEFORE any
@@ -187,7 +224,7 @@ void PackageCoordinator::subscribeToPackageInstallationEvents()
     // onBeforeUpgrade acks synchronously and — if the ack landed in time —
     // drives the cascade confirmation dialog. See PackageCoordinator.h for the
     // ack-gated protocol rationale.
-    logos.package_manager.on("beforeUninstall", [this](const QVariantList& data) {
+    subscribe(QStringLiteral("beforeUninstall"), [this](const QVariantList& data) {
         if (data.isEmpty()) return;
         const QByteArray payload = data.first().toString().toUtf8();
         QJsonParseError err{};
@@ -205,7 +242,7 @@ void PackageCoordinator::subscribeToPackageInstallationEvents()
         onBeforeUninstall(name, installedDeps);
     });
 
-    logos.package_manager.on("beforeUpgrade", [this](const QVariantList& data) {
+    subscribe(QStringLiteral("beforeUpgrade"), [this](const QVariantList& data) {
         if (data.isEmpty()) return;
         const QByteArray payload = data.first().toString().toUtf8();
         QJsonParseError err{};
@@ -230,7 +267,7 @@ void PackageCoordinator::subscribeToPackageInstallationEvents()
 
     // beforeInstall — the catalog-install gate. Same ack-then-dialog shape as
     // beforeUpgrade, but with no dependents (a fresh install unloads nothing).
-    logos.package_manager.on("beforeInstall", [this](const QVariantList& data) {
+    subscribe(QStringLiteral("beforeInstall"), [this](const QVariantList& data) {
         if (data.isEmpty()) return;
         const QByteArray payload = data.first().toString().toUtf8();
         QJsonParseError err{};
@@ -248,7 +285,7 @@ void PackageCoordinator::subscribeToPackageInstallationEvents()
 
     // Multi-uninstall is a separate event so existing single-uninstall handlers
     // don't have to peek at the payload shape to disambiguate.
-    logos.package_manager.on("beforeMultiUninstall", [this](const QVariantList& data) {
+    subscribe(QStringLiteral("beforeMultiUninstall"), [this](const QVariantList& data) {
         if (data.isEmpty()) return;
         const QByteArray payload = data.first().toString().toUtf8();
         QJsonParseError err{};
@@ -275,7 +312,7 @@ void PackageCoordinator::subscribeToPackageInstallationEvents()
     // for the multi variant, and the App Manager now runs exclusively through
     // it. Without this a 3s ack timeout (or a cancel that raced the dialog)
     // is completely silent.
-    logos.package_manager.on("multiUninstallCancelled", [this](const QVariantList& data) {
+    subscribe(QStringLiteral("multiUninstallCancelled"), [this](const QVariantList& data) {
         if (data.isEmpty()) return;
         const QJsonDocument doc =
             QJsonDocument::fromJson(data.first().toString().toUtf8());
@@ -286,7 +323,6 @@ void PackageCoordinator::subscribeToPackageInstallationEvents()
         m_lastRequestedTargets.clear();
         if (reason.contains(QStringLiteral("user cancelled"))) return;
         qWarning() << "multiUninstallCancelled:" << reason;
-    });
     });
 }
 
