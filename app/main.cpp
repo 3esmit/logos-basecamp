@@ -264,6 +264,13 @@ int main(int argc, char *argv[])
     // Create and show the main window. Heap-allocated so we can control
     // destruction ordering explicitly during shutdown (see below).
     auto mainWindow = std::make_unique<Window>(&logosAPI);
+
+#ifdef ENABLE_QML_INSPECTOR
+    // Start the inspector before showing the window so clients can connect
+    // while platform-specific window and QML rendering initialization runs.
+    InspectorServer::attach(mainWindow.get());
+#endif
+
     mainWindow->show();
 
     if (smokeCheck) {
@@ -278,11 +285,6 @@ int main(int argc, char *argv[])
             app.exit(0);
         });
     }
-
-#ifdef ENABLE_QML_INSPECTOR
-    // Start QML Inspector server (controlled by QML_INSPECTOR_PORT env var, default 3768)
-    InspectorServer::attach(mainWindow.get());
-#endif
 
     // Set up timer to poll module stats every 2 seconds
     QTimer* statsTimer = new QTimer(&app);
