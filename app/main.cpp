@@ -166,6 +166,7 @@ int main(int argc, char *argv[])
         }
         smokeCheck = parser.isSet(smokeCheckOption);
     }
+    app.setProperty("logosBasecampSmokeCheck", smokeCheck);
 
     // Redirect stdout/stderr to a rotating per-session log file under
     // <baseDirectory>/logs. Must happen after setOrganizationName/setApplicationName

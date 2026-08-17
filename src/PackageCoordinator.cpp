@@ -8,6 +8,7 @@
 #include "LogosBasecampPaths.h"
 
 #include <QDebug>
+#include <QCoreApplication>
 #include <QDir>
 #include <QFile>
 #include <QJsonArray>
@@ -86,11 +87,17 @@ bool moduleIsLoaded(CoreModuleManager* core, const QString& name)
     return core->loadedModules().contains(name);
 }
 
+bool smokeCheckActive()
+{
+    const auto* app = QCoreApplication::instance();
+    return app && app->property("logosBasecampSmokeCheck").toBool();
+}
+
 } // namespace
 
 void PackageCoordinator::subscribeToPackageInstallationEvents()
 {
-    if (!m_logosAPI) {
+    if (!m_logosAPI || smokeCheckActive()) {
         return;
     }
 
@@ -285,7 +292,7 @@ void PackageCoordinator::subscribeToPackageInstallationEvents()
 
 void PackageCoordinator::subscribeToPackageDownloaderEvents()
 {
-    if (!m_logosAPI) return;
+    if (!m_logosAPI || smokeCheckActive()) return;
 
     if (m_packageDownloaderSubscribed) {
         return;
@@ -722,6 +729,7 @@ void PackageCoordinator::confirmUninstallCascade(const QString& moduleName)
 
 void PackageCoordinator::refresh()
 {
+    if (smokeCheckActive()) return;
     fetchUiPluginMetadata();
     refreshRepositories();
     ensureMaintainedRepository();
