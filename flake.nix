@@ -6,7 +6,7 @@
     # Follow the same nixpkgs as logos-nix
     nixpkgs.follows = "logos-nix/nixpkgs";
     logos-cpp-sdk.url = "github:3esmit/logos-cpp-sdk/ec020bd06776a71b204406384db2b194001bc543";
-    logos-cpp-sdk.inputs.logos-protocol.follows = "logos-protocol";
+    logos-cpp-sdk.inputs.logos-protocol.url = "github:3esmit/logos-protocol/819ad7f7b264c7c73e528cb859063619690a0279";
     logos-protocol = {
       # Inspector uses scoped C clients for independently managed module
       # instances, so Basecamp must expose the same published protocol ABI.
@@ -16,15 +16,24 @@
     logos-qt-sdk = {
       url = "github:3esmit/logos-qt-sdk/67fac90bde3473d43c48483880492f024ad167e1";
       inputs.logos-nix.follows = "logos-nix";
-      inputs.logos-protocol.follows = "logos-protocol";
+      inputs.logos-protocol.url = "github:3esmit/logos-protocol/819ad7f7b264c7c73e528cb859063619690a0279";
       inputs.logos-cpp-sdk.follows = "logos-cpp-sdk";
+    };
+    logos-module-builder = {
+      url = "github:3esmit/logos-module-builder/324b459c3f7b59171d249f3ccbcc362403b3fcaf";
+      inputs.logos-cpp-sdk.follows = "logos-cpp-sdk";
+      inputs.logos-protocol.url = "github:3esmit/logos-protocol/819ad7f7b264c7c73e528cb859063619690a0279";
+      inputs.logos-qt-sdk.follows = "logos-qt-sdk";
     };
     logos-module.url = "github:logos-co/logos-module";
     logos-liblogos.url = "github:3esmit/logos-liblogos";
     logos-package-manager.url = "github:logos-co/logos-package-manager";
     logos-package-manager-module.url = "github:logos-co/logos-package-manager-module";
     logos-package-downloader-module.url = "github:logos-co/logos-package-downloader-module";
-    logos-capability-module.url = "github:3esmit/logos-capability-module";
+    logos-capability-module = {
+      url = "github:3esmit/logos-capability-module";
+      inputs.logos-module-builder.follows = "logos-module-builder";
+    };
     logos-package.url = "github:logos-co/logos-package";
     logos-package-manager-ui.url = "github:logos-co/logos-package-manager-ui";
     logos-design-system.url = "github:logos-co/logos-design-system";
@@ -49,7 +58,7 @@
     extra-trusted-public-keys = [ "public:l4HrXgL4nw246+LBh2SOJyhz64BoGegOYLheT/iIAPU=" ];
   };
 
-  outputs = { self, nixpkgs, logos-nix, logos-cpp-sdk, logos-protocol, logos-qt-sdk, logos-module, logos-liblogos, logos-package-manager, logos-package-manager-module, logos-package-downloader-module, logos-capability-module, logos-package, logos-package-manager-ui, logos-design-system, logos-view-module-runtime, logos-qt-mcp, nix-bundle-logos-module-install, nix-bundle-dir, nix-bundle-appimage, nix-bundle-macos-app }:
+  outputs = { self, nixpkgs, logos-nix, logos-cpp-sdk, logos-protocol, logos-qt-sdk, logos-module-builder, logos-module, logos-liblogos, logos-package-manager, logos-package-manager-module, logos-package-downloader-module, logos-capability-module, logos-package, logos-package-manager-ui, logos-design-system, logos-view-module-runtime, logos-qt-mcp, nix-bundle-logos-module-install, nix-bundle-dir, nix-bundle-appimage, nix-bundle-macos-app }:
     let
       systems = [ "aarch64-darwin" "x86_64-darwin" "aarch64-linux" "x86_64-linux" ];
       # Build info (version + commit hashes) baked into the main UI plugin so
