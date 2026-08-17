@@ -10,7 +10,7 @@
     logos-protocol = {
       # Inspector uses scoped C clients for independently managed module
       # instances, so Basecamp must expose the same published protocol ABI.
-      url = "github:3esmit/logos-protocol/719a473fedbd7fbabcf9d5485f96abaddf29c622";
+      url = "github:3esmit/logos-protocol/819ad7f7b264c7c73e528cb859063619690a0279";
       inputs.logos-nix.follows = "logos-nix";
     };
     logos-qt-sdk = {
