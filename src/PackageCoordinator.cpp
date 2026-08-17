@@ -108,19 +108,23 @@ void PackageCoordinator::subscribeToPackageInstallationEvents()
     }
     m_packageManagerSubscribed = true;
 
-    // The package manager IPC calls below are synchronous. Running them while
-    // MainUIBackend is still constructing its QML object graph can re-enter Qt
-    // on macOS and crash before the event loop starts. Finish wiring the
-    // coordinator after construction has returned to the event loop.
+    // Finish wiring the coordinator after construction has returned to the
+    // event loop. The directory calls use the async API: synchronous QtRO
+    // calls can re-enter the QML object graph on macOS and crash during cold
+    // startup.
     QTimer::singleShot(0, this, [this]() {
     LogosModules logos(m_logosAPI);
 
     // Configure the package_manager module's directories so it knows where
     // to install.
-    logos.package_manager.setEmbeddedModulesDirectory(LogosBasecampPaths::embeddedModulesDirectory());
-    logos.package_manager.setUserModulesDirectory(LogosBasecampPaths::modulesDirectory());
-    logos.package_manager.setEmbeddedUiPluginsDirectory(LogosBasecampPaths::embeddedPluginsDirectory());
-    logos.package_manager.setUserUiPluginsDirectory(LogosBasecampPaths::pluginsDirectory());
+    logos.package_manager.setEmbeddedModulesDirectoryAsync(
+        LogosBasecampPaths::embeddedModulesDirectory(), []() {});
+    logos.package_manager.setUserModulesDirectoryAsync(
+        LogosBasecampPaths::modulesDirectory(), []() {});
+    logos.package_manager.setEmbeddedUiPluginsDirectoryAsync(
+        LogosBasecampPaths::embeddedPluginsDirectory(), []() {});
+    logos.package_manager.setUserUiPluginsDirectoryAsync(
+        LogosBasecampPaths::pluginsDirectory(), []() {});
 
     logos.package_manager.on("corePluginFileInstalled", [this](const QVariantList& data) {
         if (data.isEmpty()) return;
