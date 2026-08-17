@@ -21,6 +21,8 @@ pkgs.runCommand "logos-basecamp-integration-test" {
   export QT_QPA_PLATFORM=offscreen
   export QT_FORCE_STDERR_LOGGING=1
   export QT_LOGGING_RULES="qt.*.debug=false;default.debug=true"
+  export QML_INSPECTOR_HOST=127.0.0.1
+  export QML_INSPECTOR_PORT=3768
 
   ${pkgs.lib.optionalString pkgs.stdenv.isLinux ''
     export QT_PLUGIN_PATH="${pkgs.qt6.qtbase}/${pkgs.qt6.qtbase.qtPluginPrefix}"

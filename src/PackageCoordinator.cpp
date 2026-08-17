@@ -108,6 +108,11 @@ void PackageCoordinator::subscribeToPackageInstallationEvents()
     }
     m_packageManagerSubscribed = true;
 
+    // The package manager IPC calls below are synchronous. Running them while
+    // MainUIBackend is still constructing its QML object graph can re-enter Qt
+    // on macOS and crash before the event loop starts. Finish wiring the
+    // coordinator after construction has returned to the event loop.
+    QTimer::singleShot(0, this, [this]() {
     LogosModules logos(m_logosAPI);
 
     // Configure the package_manager module's directories so it knows where
@@ -270,6 +275,7 @@ void PackageCoordinator::subscribeToPackageInstallationEvents()
         m_lastRequestedTargets.clear();
         if (reason.contains(QStringLiteral("user cancelled"))) return;
         qWarning() << "multiUninstallCancelled:" << reason;
+    });
     });
 }
 
