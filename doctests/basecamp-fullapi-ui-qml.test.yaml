@@ -121,7 +121,7 @@ sections:
             - name: "The plugin view renders with its controls"
               action: wait_for
               texts: ["Run All Methods", "Fire Events"]
-              timeout: 30000
+              timeout: 120000
               screenshot: "fullapi-qml-view.png"
 
             - name: "Run every QML-expressible method type from QML"

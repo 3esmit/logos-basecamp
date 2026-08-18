@@ -131,7 +131,7 @@ sections:
             - name: "The plugin view renders with its controls"
               action: wait_for
               texts: ["Run All Methods", "Fire Events", "Bind Rust Provider"]
-              timeout: 30000
+              timeout: 120000
               screenshot: "fullapi-view.png"
 
             - name: "Run every method type against the C++ provider"
@@ -269,7 +269,7 @@ sections:
             - name: "The plugin view renders (cross-version A)"
               action: wait_for
               texts: ["Run All Methods", "Bind Proxy"]
-              timeout: 30000
+              timeout: 90000
 
             - name: "Bind the interface to the proxy so the chain is UI → proxy → provider"
               action: click
@@ -360,7 +360,7 @@ sections:
             - name: "The plugin view renders (cross-version B)"
               action: wait_for
               texts: ["Run All Methods", "Bind Proxy"]
-              timeout: 30000
+              timeout: 90000
 
             - name: "Bind the interface to the proxy so the chain is UI → proxy → provider"
               action: click

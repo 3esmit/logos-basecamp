@@ -166,6 +166,7 @@ int main(int argc, char *argv[])
         }
         smokeCheck = parser.isSet(smokeCheckOption);
     }
+    app.setProperty("logosBasecampSmokeCheck", smokeCheck);
 
     // Redirect stdout/stderr to a rotating per-session log file under
     // <baseDirectory>/logs. Must happen after setOrganizationName/setApplicationName
@@ -261,9 +262,30 @@ int main(int argc, char *argv[])
     installUnixSignalHandlers(app);
 #endif
 
+#ifdef ENABLE_QML_INSPECTOR
+    // Smoke checks only validate startup and run without an inspector client.
+    // Keep the server out of that path because platform-specific offscreen
+    // initialization can otherwise crash before the check completes.
+    InspectorServer* inspector = nullptr;
+    if (!smokeCheck) {
+        // Start before constructing the window. Main UI setup can perform
+        // synchronous module work on a cold portable launch; the test harness
+        // must be able to connect while that work is still in progress.
+        inspector = InspectorServer::attach(nullptr);
+    }
+#endif
+
     // Create and show the main window. Heap-allocated so we can control
     // destruction ordering explicitly during shutdown (see below).
     auto mainWindow = std::make_unique<Window>(&logosAPI);
+
+#ifdef ENABLE_QML_INSPECTOR
+    if (inspector) {
+        inspector->setRootWidget(mainWindow.get());
+        inspector->setParent(mainWindow.get());
+    }
+#endif
+
     mainWindow->show();
 
     if (smokeCheck) {
@@ -278,11 +300,6 @@ int main(int argc, char *argv[])
             app.exit(0);
         });
     }
-
-#ifdef ENABLE_QML_INSPECTOR
-    // Start QML Inspector server (controlled by QML_INSPECTOR_PORT env var, default 3768)
-    InspectorServer::attach(mainWindow.get());
-#endif
 
     // Set up timer to poll module stats every 2 seconds
     QTimer* statsTimer = new QTimer(&app);

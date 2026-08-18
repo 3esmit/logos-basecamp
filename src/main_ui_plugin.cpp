@@ -4,6 +4,7 @@
 #include "MainContainer.h"
 #include "MainUIBackend.h"
 #include <QDebug>
+#include <QTimer>
 #include <QUuid>
 #include "logos_api.h"
 #include "logos_api_client.h"
@@ -45,7 +46,11 @@ QWidget* MainUIPlugin::createWidget(LogosAPI* logosAPI)
     
     if (!m_mainContainer) {
         m_mainContainer = new MainContainer(m_logosAPI);
-        startCoreService();
+        // Capability-token registration can perform a synchronous Qt Remote
+        // Objects handshake. Defer it until the event loop is running so a
+        // cold macOS launch cannot block Window construction before the
+        // inspector and UI become reachable.
+        QTimer::singleShot(0, this, [this]() { startCoreService(); });
     }
     return m_mainContainer;
 }
