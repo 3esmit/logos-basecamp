@@ -195,6 +195,7 @@ jobs:
             "$RUNNER_TEMP/basecamp-doctests/basecamp-package-lifecycle.test.yaml" \
             "$RUNNER_TEMP/basecamp-doctests/basecamp-missing-deps.test.yaml" \
             "$RUNNER_TEMP/basecamp-doctests/basecamp-persistence.test.yaml" \
+            "$RUNNER_TEMP/basecamp-doctests/basecamp-module-unload.test.yaml" \
             --verbose \
             --continue-on-fail \
             --release-for logos-basecamp=${{ steps.source.outputs.sha }} \
