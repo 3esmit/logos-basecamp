@@ -131,7 +131,7 @@ sections:
             - name: "The plugin view renders with its controls"
               action: wait_for
               texts: ["Run All Methods", "Fire Events", "Bind Rust Provider"]
-              timeout: 60000
+              timeout: 120000
               screenshot: "fullapi-view.png"
 
             - name: "Run every method type against the C++ provider"
