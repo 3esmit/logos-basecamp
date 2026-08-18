@@ -140,7 +140,7 @@ jobs:
         shell: bash
         run: |
           mkdir -p "$RUNNER_TEMP/basecamp-doctests"
-          for spec in basecamp-modules basecamp-modules-bundle basecamp-fullapi-ui basecamp-fullapi-ui-qml basecamp-shortcut-bridge basecamp-package-lifecycle basecamp-missing-deps basecamp-persistence; do
+          for spec in basecamp-modules basecamp-modules-bundle basecamp-fullapi-ui basecamp-fullapi-ui-qml basecamp-shortcut-bridge basecamp-package-lifecycle basecamp-missing-deps basecamp-persistence basecamp-module-unload; do
             sed "s#github:logos-co/logos-basecamp{release}#github:${BASECAMP_REPOSITORY}{release}#g" \
               "doctests/${spec}.test.yaml" \
               > "$RUNNER_TEMP/basecamp-doctests/${spec}.test.yaml"
@@ -223,7 +223,7 @@ jobs:
 
       - name: Verify markdown generation
         run: |
-          for spec in basecamp-modules basecamp-modules-bundle basecamp-fullapi-ui basecamp-fullapi-ui-qml basecamp-shortcut-bridge basecamp-package-lifecycle basecamp-missing-deps basecamp-persistence; do
+          for spec in basecamp-modules basecamp-modules-bundle basecamp-fullapi-ui basecamp-fullapi-ui-qml basecamp-shortcut-bridge basecamp-package-lifecycle basecamp-missing-deps basecamp-persistence basecamp-module-unload; do
             nix run github:logos-co/logos-doctest -- generate \
               "${{ runner.temp }}/basecamp-doctests/${spec}.test.yaml" \
               --release-for logos-basecamp=${{ steps.source.outputs.sha }} \
