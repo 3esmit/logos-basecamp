@@ -259,16 +259,6 @@ void PluginLoader::loadUiQmlModule(const PluginLoadRequest& request)
 
     // Has a backend plugin — spawn a ViewModuleHost process.
     auto* viewHost = new ViewModuleHost(this);
-    if (!viewHost->spawn(request.name, request.mainFilePath, uiAuthToken)) {
-        qWarning() << "Failed to spawn ui-host for ui_qml module" << request.name;
-        delete viewHost;
-        delete bridge;
-        setLoading(request.name, false);
-        emit pluginLoadFailed(request.name,
-            QStringLiteral("Failed to spawn ui-host for ") + request.name);
-        return;
-    }
-
     auto onHostReady = [this, request, bridge, viewHost]() {
         bridge->setViewModuleSocket(request.name, viewHost->socketName());
 
@@ -313,6 +303,23 @@ void PluginLoader::loadUiQmlModule(const PluginLoadRequest& request)
                 QStringLiteral("Timeout waiting for ui-host for ") + request.name);
         });
     timeout->start(30000);
+
+    // Install the ready listener before starting the child. A fast child can
+    // print READY during spawn(); connecting afterwards loses the signal and
+    // leaves the plugin stuck until the timeout, most visibly on macOS.
+    if (!viewHost->spawn(request.name, request.mainFilePath, uiAuthToken)) {
+        QObject::disconnect(*readyConn);
+        QObject::disconnect(*timeoutConn);
+        timeout->stop();
+        timeout->deleteLater();
+        qWarning() << "Failed to spawn ui-host for ui_qml module" << request.name;
+        delete viewHost;
+        delete bridge;
+        setLoading(request.name, false);
+        emit pluginLoadFailed(request.name,
+            QStringLiteral("Failed to spawn ui-host for ") + request.name);
+        return;
+    }
 }
 
 void PluginLoader::loadQmlView(const PluginLoadRequest& request,
