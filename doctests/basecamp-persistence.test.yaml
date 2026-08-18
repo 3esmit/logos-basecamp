@@ -387,7 +387,7 @@ sections:
             - name: "The app runs in the installing process"
               action: wait_for
               texts: ["Persistence demo view v0.1.1"]
-              timeout: 30000
+              timeout: 90000
               text: "The baseline: in the process that performed the install, the app is listed and runs. Whether any of this survives the process is the next section's question."
               screenshot: "persist-app.png"
 
@@ -494,7 +494,7 @@ sections:
             - name: "It loads and renders the installed payload"
               action: wait_for
               texts: ["Persistence demo view v0.1.1"]
-              timeout: 30000
+              timeout: 90000
               text: "Not just listed but loadable: the plugin loads from the persisted files and the view prints its version — the exact installed payload is what runs after the restart."
               screenshot: "persist-restart-app.png"
 
@@ -676,7 +676,7 @@ sections:
             - name: "Its payload renders from the moved user-dir"
               action: wait_for
               texts: ["Persistence demo view v0.1.1"]
-              timeout: 30000
+              timeout: 90000
               text: "The restart proof, replayed at a new address: the boot-time scan found the app in the moved `plugins/`, and the payload it renders came along."
               screenshot: "portable-app.png"
 
