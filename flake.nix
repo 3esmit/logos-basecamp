@@ -38,9 +38,11 @@
     logos-package-manager-ui.url = "github:logos-co/logos-package-manager-ui";
     logos-design-system.url = "github:logos-co/logos-design-system";
     logos-view-module-runtime = {
-      url = "github:3esmit/logos-view-module-runtime?rev=b0030040266a05509ac6de892832c3578f0ab3a9";
+      url = "github:3esmit/logos-view-module-runtime?rev=a79e2bc334d00d898999f95cd8cd19707f8ac1e6";
       inputs.nixpkgs.follows = "nixpkgs";
       inputs.logos-cpp-sdk.follows = "logos-cpp-sdk";
+      inputs.logos-protocol.follows = "logos-protocol";
+      inputs.logos-qt-sdk.follows = "logos-qt-sdk";
     };
     nix-bundle-logos-module-install.url = "github:logos-co/nix-bundle-logos-module-install";
     nix-bundle-dir.url = "github:logos-co/nix-bundle-dir";
