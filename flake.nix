@@ -5,40 +5,40 @@
     logos-nix.url = "github:logos-co/logos-nix";
     # Follow the same nixpkgs as logos-nix
     nixpkgs.follows = "logos-nix/nixpkgs";
-    logos-cpp-sdk.url = "github:3esmit/logos-cpp-sdk/ec020bd06776a71b204406384db2b194001bc543";
-    logos-cpp-sdk.inputs.logos-protocol.url = "github:3esmit/logos-protocol/46d04ea6f160c44e8c84270cf7c3a4adec2029f0";
+    logos-cpp-sdk.url = "github:3esmit/logos-cpp-sdk?rev=790030b442f3fc210f973fb2b8807e3495ee9724";
+    logos-cpp-sdk.inputs.logos-protocol.url = "github:3esmit/logos-protocol?rev=dbd1df94caeb3e073c330fc3d95988ce1086b1a5";
     logos-protocol = {
       # Inspector uses scoped C clients for independently managed module
       # instances, so Basecamp must expose the same published protocol ABI.
-      url = "github:3esmit/logos-protocol/46d04ea6f160c44e8c84270cf7c3a4adec2029f0";
+      url = "github:3esmit/logos-protocol?rev=dbd1df94caeb3e073c330fc3d95988ce1086b1a5";
       inputs.logos-nix.follows = "logos-nix";
     };
     logos-qt-sdk = {
-      url = "github:3esmit/logos-qt-sdk/67fac90bde3473d43c48483880492f024ad167e1";
+      url = "github:3esmit/logos-qt-sdk?rev=c5245c1b900b599a7b0f892fd349af8af3257692";
       inputs.logos-nix.follows = "logos-nix";
-      inputs.logos-protocol.url = "github:3esmit/logos-protocol/46d04ea6f160c44e8c84270cf7c3a4adec2029f0";
+      inputs.logos-protocol.url = "github:3esmit/logos-protocol?rev=dbd1df94caeb3e073c330fc3d95988ce1086b1a5";
       inputs.logos-cpp-sdk.follows = "logos-cpp-sdk";
     };
     logos-module-builder = {
-      url = "github:3esmit/logos-module-builder/324b459c3f7b59171d249f3ccbcc362403b3fcaf";
+      url = "github:3esmit/logos-module-builder?rev=e9d51fba2728a9cf6bbc3440b6b67d1c8917b263";
       inputs.logos-cpp-sdk.follows = "logos-cpp-sdk";
-      inputs.logos-protocol.url = "github:3esmit/logos-protocol/46d04ea6f160c44e8c84270cf7c3a4adec2029f0";
+      inputs.logos-protocol.url = "github:3esmit/logos-protocol?rev=dbd1df94caeb3e073c330fc3d95988ce1086b1a5";
       inputs.logos-qt-sdk.follows = "logos-qt-sdk";
     };
     logos-module.url = "github:logos-co/logos-module";
-    logos-liblogos.url = "github:3esmit/logos-liblogos";
+    logos-liblogos.url = "github:3esmit/logos-liblogos?rev=b4a3417e09b65d4e17f4088ce3c475019c726e09";
     logos-package-manager.url = "github:logos-co/logos-package-manager";
     logos-package-manager-module.url = "github:logos-co/logos-package-manager-module";
     logos-package-downloader-module.url = "github:logos-co/logos-package-downloader-module";
     logos-capability-module = {
-      url = "github:3esmit/logos-capability-module";
+      url = "github:3esmit/logos-capability-module?rev=895bb4ebfe5b00b2cb85a2c2da181ecd3c26d543";
       inputs.logos-module-builder.follows = "logos-module-builder";
     };
     logos-package.url = "github:logos-co/logos-package";
     logos-package-manager-ui.url = "github:logos-co/logos-package-manager-ui";
     logos-design-system.url = "github:logos-co/logos-design-system";
     logos-view-module-runtime = {
-      url = "github:3esmit/logos-view-module-runtime?rev=a79e2bc334d00d898999f95cd8cd19707f8ac1e6";
+      url = "github:3esmit/logos-view-module-runtime?rev=75bb6825165a45923054e77688035103d3818a33";
       inputs.nixpkgs.follows = "nixpkgs";
       inputs.logos-cpp-sdk.follows = "logos-cpp-sdk";
       inputs.logos-protocol.follows = "logos-protocol";
