@@ -91,6 +91,8 @@ MainUIBackend::MainUIBackend(LogosAPI* logosAPI, QObject* parent)
             this,              &MainUIBackend::navigateToRepositoriesRequested);
     connect(m_uiPluginManager, &UIPluginManager::coreModuleLoadFailedNotice,
             this,              &MainUIBackend::coreModuleLoadFailedNotice);
+    connect(m_uiPluginManager, &UIPluginManager::packageInstallFailedNotice,
+            this,              &MainUIBackend::installFailureNoticeRequested);
     connect(m_uiPluginManager, &UIPluginManager::missingDepsPopupRequested,
             this,              &MainUIBackend::missingDepsPopupRequested);
     connect(m_uiPluginManager, &UIPluginManager::unloadCascadeConfirmationRequested,
