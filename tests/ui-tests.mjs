@@ -474,20 +474,21 @@ test("app manager: application cards expose identity and activation semantics", 
   // The catalog is remote and may be unavailable in CI. Instantiate the
   // production delegate with the same Inspector-shaped row so accessibility
   // coverage does not depend on network data.
-  const proxy = await app.findByProperty("objectName", "appManager.localAppsProxy");
-  if (!proxy.matches?.length) {
-    throw new Error("App Manager model anchor not found");
+  const overlay = await app.findByProperty("objectName", "overlayDialogs");
+  if (!overlay.matches?.length) {
+    throw new Error("Overlay dialog anchor not found");
   }
   const fixtureObjectName = "test.appGridDelegate.logos_inspector_ui";
   const fixture = await app.inspector.send("evaluate", {
-    objectId: proxy.matches[0].id,
+    objectId: overlay.matches[0].id,
     expression: `(function() {
       var component = Qt.createComponent(
         "qrc:/qt/qml/Basecamp/AppManager/AppGridDelegate.qml");
-      var object = component.createObject(backend.appsModel, {
+      var object = component.createObject(root, {
         objectName: ${JSON.stringify(fixtureObjectName)},
         width: 180,
         height: 162,
+        visible: false,
         appData: ({
           name: "logos_inspector_ui",
           displayName: "Logos Inspector",
