@@ -21,6 +21,8 @@ Dialog {
     signal versionChangeRequested(string name, string repositoryUrl, var versionPins)
     signal uninstallRequested(string name, string repositoryUrl)
 
+    objectName: "addApplicationDialog"
+
     function openWith(metadata_) {
         root.metadata = metadata_ || ({})
         d.pickedVersions = ({})
@@ -62,6 +64,10 @@ Dialog {
         readonly property string targetRepoUrl:     root.metadata.repositoryUrl || ""
         readonly property string targetVersion:     root.metadata.selectedVersion || ""
         readonly property string targetDisplayName: root.metadata.displayName || root.metadata.name || ""
+        readonly property string accessibleTitle:
+            d.targetDisplayName.length > 0
+                ? qsTr("Add Application: %1").arg(d.targetDisplayName)
+                : qsTr("Add Application")
         readonly property string targetIcon: {
             const raw = root.metadata.icon || ""
             if (raw.length === 0)       return ""
@@ -271,6 +277,13 @@ Dialog {
     }
 
     contentItem: ColumnLayout {
+        objectName: "addApplicationDialog.content"
+        Accessible.role: Accessible.Dialog
+        Accessible.name: d.accessibleTitle
+        Accessible.description: d.targetRepoUrl.length > 0
+            ? qsTr("Package repository: %1").arg(d.targetRepoUrl)
+            : ""
+
         spacing: Theme.spacing.large
 
         // ─── Header ───
@@ -281,17 +294,22 @@ Dialog {
             Layout.rightMargin: Theme.spacing.large
 
             LogosText {
+                objectName: "addApplicationDialog.title"
                 Layout.fillWidth: true
                 text: qsTr("Add Application")
                 font.pixelSize: Theme.typography.pageTitleText
                 font.weight: Theme.typography.weightBold
                 color: Theme.palette.text
+                Accessible.role: Accessible.Heading
+                Accessible.name: d.accessibleTitle
             }
 
             LogosIconButton {
+                objectName: "addApplicationDialog.closeButton"
                 iconSource: LogosIcons.close
                 size: 28
                 iconSize: 14
+                Accessible.name: qsTr("Close")
                 background: Rectangle {
                     radius: width / 2
                     color: Theme.palette.surfaceRaised
@@ -308,6 +326,10 @@ Dialog {
             Layout.preferredHeight: 200
             color: Theme.palette.background
             radius: Theme.spacing.radiusMedium
+            objectName: "addApplicationDialog.appCard"
+            Accessible.role: Accessible.Grouping
+            Accessible.name: d.targetDisplayName
+            Accessible.description: root.metadata.description || ""
 
             ColumnLayout {
                 anchors.centerIn: parent
@@ -322,14 +344,18 @@ Dialog {
                                    : AppColors.colorForApp(d.targetName)
                     tileSize: d.tileSize
                     interactive: false
+                    Accessible.ignored: true
                 }
 
                 LogosText {
+                    objectName: "addApplicationDialog.appName"
                     Layout.alignment: Qt.AlignHCenter
                     text: d.targetDisplayName
                     font.pixelSize: Theme.typography.primaryText
                     font.weight: Theme.typography.weightMedium
                     color: Theme.palette.text
+                    Accessible.role: Accessible.StaticText
+                    Accessible.name: d.targetDisplayName
                 }
             }
         }
@@ -401,6 +427,7 @@ Dialog {
                     Layout.rightMargin: Theme.spacing.small
                     visible: d.canUninstall
                     text: qsTr("Uninstall")
+                    Accessible.name: qsTr("Uninstall %1").arg(d.targetDisplayName)
                     onClicked: {
                         root.uninstallRequested(d.targetName, d.targetRepoUrl)
                         root.close()
@@ -416,11 +443,16 @@ Dialog {
 
                 LogosButton {
                     id: actionButton
+                    objectName: "addApplicationDialog.actionButton"
                     Layout.alignment: Qt.AlignVCenter
                     Layout.preferredWidth: 110
                     Layout.preferredHeight: 40
                     enabled: d.actionEnabled
                     text: d.actionText
+                    Accessible.role: Accessible.Button
+                    Accessible.name: d.actionText.length > 0
+                        ? qsTr("%1 %2").arg(d.actionText).arg(d.targetDisplayName)
+                        : d.targetDisplayName
                     onClicked: {
                         if (d.actionMode === "launch") {
                             root.launchRequested(d.targetName)
@@ -450,20 +482,27 @@ Dialog {
             Layout.topMargin: Theme.spacing.medium
 
             LogosText {
+                objectName: "addApplicationDialog.requiredPackagesTitle"
                 Layout.fillWidth: true
                 text: qsTr("Required Packages")
                 font.pixelSize: Theme.typography.panelTitleText
                 font.weight: Theme.typography.weightMedium
                 color: Theme.palette.text
+                Accessible.role: Accessible.Heading
+                Accessible.name: qsTr("Required Packages")
             }
             LogosText {
+                objectName: "addApplicationDialog.requiredPackagesCount"
                 text: d.counterText
                 font.pixelSize: Theme.typography.primaryText
                 color: Theme.palette.textSecondary
+                Accessible.role: Accessible.StaticText
+                Accessible.name: d.counterText
             }
         }
 
         LogosListView {
+            objectName: "addApplicationDialog.requiredPackages"
             Layout.fillWidth: true
             Layout.leftMargin: Theme.spacing.large
             Layout.rightMargin: Theme.spacing.large
@@ -471,6 +510,8 @@ Dialog {
             interactive: false
             spacing: 0
             model: root.requiredPackagesModel
+            Accessible.role: Accessible.List
+            Accessible.name: qsTr("Required Packages")
 
             delegate: PackageRowDelegate {
                 width: ListView.view.width

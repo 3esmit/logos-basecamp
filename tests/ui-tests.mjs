@@ -453,6 +453,117 @@ test("app manager: panel + categories sidebar render on first open", async (app)
   );
 });
 
+async function accessibleValue(app, objectName, expression) {
+  const result = await app.findByProperty("objectName", objectName);
+  if (!result.matches?.length) {
+    throw new Error(`Accessible control not found: ${objectName}`);
+  }
+  const response = await app.inspector.send("evaluate", {
+    objectId: result.matches[0].id,
+    expression,
+  });
+  if (response.error) {
+    throw new Error(`Could not evaluate ${objectName}: ${response.error}`);
+  }
+  return response.result;
+}
+
+test("app manager: application cards expose identity and activation semantics", async (app) => {
+  await app.click("Applications");
+  await app.waitFor(
+    async () => {
+      const result = await app.findByProperty(
+        "objectName", "appGridDelegate.logos_inspector_ui");
+      if (!result.matches?.length) {
+        throw new Error("Inspector application card not found");
+      }
+    },
+    { timeout: 15000, interval: 500, description: "Inspector application card to render" }
+  );
+
+  const name = await accessibleValue(
+    app, "appGridDelegate.logos_inspector_ui", "Accessible.name");
+  if (name !== "Logos Inspector") {
+    throw new Error(`Unexpected accessible card name: ${JSON.stringify(name)}`);
+  }
+
+  const roleMatches = await accessibleValue(
+    app,
+    "appGridDelegate.logos_inspector_ui",
+    "Accessible.role === Accessible.ListItem");
+  if (roleMatches !== true) {
+    throw new Error("Inspector application card is not exposed as a list item");
+  }
+
+  const focusable = await accessibleValue(
+    app,
+    "appGridDelegate.logos_inspector_ui",
+    "Accessible.focusable");
+  if (focusable !== true) {
+    throw new Error("Inspector application card is not exposed as focusable");
+  }
+});
+
+test("app manager: add application dialog exposes named install controls", async (app) => {
+  const dialog = await app.findByProperty("objectName", "addApplicationDialog");
+  if (!dialog.matches?.length) {
+    throw new Error("Add Application dialog not found");
+  }
+  const dialogId = dialog.matches[0].id;
+
+  const metadata = {
+    name: "logos_inspector_ui",
+    displayName: "Logos Inspector",
+    repositoryUrl: "https://example.com/logos-repo.json",
+    description: "Inspector application",
+    selectedVersion: "0.2.0",
+    versions: [],
+  };
+  const opened = await app.inspector.send("evaluate", {
+    objectId: dialogId,
+    expression: `openWith(${JSON.stringify(metadata)})`,
+  });
+  if (opened.error) {
+    throw new Error(`Could not open Add Application dialog: ${opened.error}`);
+  }
+
+  await app.waitFor(
+    async () => {
+      const content = await app.findByProperty("objectName", "addApplicationDialog.content");
+      if (!content.matches?.length) {
+        throw new Error("Add Application dialog content not found");
+      }
+    },
+    { timeout: 5000, interval: 200, description: "Add Application dialog content to render" }
+  );
+
+  const dialogRole = await accessibleValue(
+    app, "addApplicationDialog.content", "Accessible.role === Accessible.Dialog");
+  if (dialogRole !== true) {
+    throw new Error("Add Application dialog has no dialog accessibility role");
+  }
+
+  const appCardName = await accessibleValue(
+    app, "addApplicationDialog.appCard", "Accessible.name");
+  if (appCardName !== "Logos Inspector") {
+    throw new Error(`Unexpected accessible dialog card name: ${JSON.stringify(appCardName)}`);
+  }
+
+  const actionName = await accessibleValue(
+    app, "addApplicationDialog.actionButton", "Accessible.name");
+  if (actionName !== "Install Logos Inspector") {
+    throw new Error(`Unexpected accessible install action name: ${JSON.stringify(actionName)}`);
+  }
+
+  const actionRole = await accessibleValue(
+    app, "addApplicationDialog.actionButton", "Accessible.role === Accessible.Button");
+  if (actionRole !== true) {
+    throw new Error("Add Application install action is not exposed as a button");
+  }
+
+  await app.inspector.send("evaluate", { objectId: dialogId, expression: "close()" });
+});
+
 // ---------------------------------------------------------------------------
 // Repositories view — disable vs remove semantics
 // ---------------------------------------------------------------------------
@@ -483,6 +594,59 @@ async function openRepositoriesView(app) {
   }
   return anchor.matches[0].id;
 }
+
+test("repositories: URL controls expose editable-text semantics", async (app) => {
+  const anchorId = await openRepositoriesView(app);
+
+  const inputName = await accessibleValue(
+    app, "repositories.addUrlInput", "Accessible.name");
+  if (inputName !== "Repository URL") {
+    throw new Error(`Unexpected accessible repository input name: ${JSON.stringify(inputName)}`);
+  }
+
+  const inputRole = await accessibleValue(
+    app, "repositories.addUrlInput", "Accessible.role === Accessible.EditableText");
+  if (inputRole !== true) {
+    throw new Error("Repository URL input is not exposed as editable text");
+  }
+
+  const inputEditable = await accessibleValue(
+    app, "repositories.addUrlInput", "Accessible.editable");
+  if (inputEditable !== true) {
+    throw new Error("Repository URL input is not exposed as editable");
+  }
+
+  const urlResponse = await app.inspector.send("evaluate", {
+    objectId: anchorId,
+    expression: "backend.repositories.length > 0 ? backend.repositories[0].url : \"\"",
+  });
+  if (urlResponse.error || typeof urlResponse.result !== "string" || !urlResponse.result) {
+    throw new Error("Could not read a repository URL for accessible-text coverage");
+  }
+  const displayedUrlObjectName = `repositories.url.${urlResponse.result}`;
+
+  await app.waitFor(
+    async () => {
+      const result = await app.findByProperty("objectName", displayedUrlObjectName);
+      if (!result.matches?.length) {
+        throw new Error(`Displayed repository URL not found: ${displayedUrlObjectName}`);
+      }
+    },
+    { timeout: 5000, interval: 200, description: "repository URL text to render" }
+  );
+
+  const displayedUrlRole = await accessibleValue(
+    app, displayedUrlObjectName, "Accessible.role === Accessible.EditableText");
+  if (displayedUrlRole !== true) {
+    throw new Error("Displayed repository URL is not exposed as selectable text");
+  }
+
+  const displayedUrlReadOnly = await accessibleValue(
+    app, displayedUrlObjectName, "Accessible.readOnly");
+  if (displayedUrlReadOnly !== true) {
+    throw new Error("Displayed repository URL is not exposed as read-only text");
+  }
+});
 
 async function isDefaultInList(app, anchorId) {
   return (await app.inspector.send("evaluate", {

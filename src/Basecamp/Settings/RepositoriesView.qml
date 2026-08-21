@@ -134,9 +134,16 @@ Item {
 
                     LogosTextField {
                         id: urlInput
+                        objectName: "repositories.addUrlInput"
                         Layout.fillWidth: true
                         placeholderText: qsTr("https://example.com/logos-repo.json")
                         text: d.newRepoUrl
+                        Accessible.role: Accessible.EditableText
+                        Accessible.name: qsTr("Repository URL")
+                        Accessible.description: qsTr("URL of a logos-repo.json index")
+                        Accessible.editable: true
+                        Accessible.focusable: true
+                        Accessible.selectableText: true
                         onTextChanged: if (text !== d.newRepoUrl) d.newRepoUrl = text
                     }
                     LogosButton {
@@ -176,6 +183,11 @@ Item {
                     color: Theme.palette.background
                     border.color: Theme.palette.borderSubtle
                     border.width: 1
+                    objectName: "repositories.card." + (url.length > 0 ? url : "unnamed")
+                    Accessible.role: Accessible.Grouping
+                    Accessible.name: displayName.length > 0 ? displayName
+                                                              : qsTr("Repository")
+                    Accessible.description: url
 
                     ColumnLayout {
                         id: rowCol
@@ -216,6 +228,14 @@ Item {
                             visible: url.length > 0
                             Layout.fillWidth: true
                             text: url
+                            objectName: "repositories.url." + url
+                            Accessible.role: Accessible.EditableText
+                            Accessible.name: qsTr("Repository URL")
+                            Accessible.description: url
+                            Accessible.editable: false
+                            Accessible.focusable: true
+                            Accessible.readOnly: true
+                            Accessible.selectableText: true
                             font.pixelSize: Theme.typography.secondaryText
                             color: Theme.palette.textSecondary
                             wrapMode: TextEdit.WrapAnywhere
@@ -248,7 +268,13 @@ Item {
                             RowLayout {
                                 spacing: Theme.spacing.small
                                 LogosSwitch {
+                                    objectName: "repositories.enabled." + url
                                     checked: isEnabled
+                                    Accessible.role: Accessible.CheckBox
+                                    Accessible.name: qsTr("Enable %1").arg(
+                                        displayName.length > 0 ? displayName : qsTr("repository"))
+                                    Accessible.description: isEnabled
+                                        ? qsTr("Enabled") : qsTr("Disabled")
                                     onToggled: root.setEnabledRequested(url, checked)
                                 }
                                 LogosText {
