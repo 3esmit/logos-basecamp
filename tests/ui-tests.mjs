@@ -470,26 +470,50 @@ async function accessibleValue(app, objectName, expression) {
 
 test("app manager: application cards expose identity and activation semantics", async (app) => {
   await app.click("Applications");
-  await app.waitFor(
-    async () => {
-      const result = await app.findByProperty(
-        "objectName", "appGridDelegate.logos_inspector_ui");
-      if (!result.matches?.length) {
-        throw new Error("Inspector application card not found");
-      }
-    },
-    { timeout: 15000, interval: 500, description: "Inspector application card to render" }
-  );
+
+  // The catalog is remote and may be unavailable in CI. Instantiate the
+  // production delegate with the same Inspector-shaped row so accessibility
+  // coverage does not depend on network data.
+  const proxy = await app.findByProperty("objectName", "appManager.localAppsProxy");
+  if (!proxy.matches?.length) {
+    throw new Error("App Manager model anchor not found");
+  }
+  const fixtureObjectName = "test.appGridDelegate.logos_inspector_ui";
+  const fixture = await app.inspector.send("evaluate", {
+    objectId: proxy.matches[0].id,
+    expression: `(function() {
+      var component = Qt.createComponent(
+        "qrc:/qt/qml/Basecamp/AppManager/AppGridDelegate.qml");
+      var object = component.createObject(backend.appsModel, {
+        objectName: ${JSON.stringify(fixtureObjectName)},
+        width: 180,
+        height: 162,
+        appData: ({
+          name: "logos_inspector_ui",
+          displayName: "Logos Inspector",
+          description: "Inspector application",
+          repositoryUrl: "https://example.com/logos-repo.json",
+          isInstalled: false,
+          installStatus: 0,
+          installStage: 0
+        })
+      });
+      return object ? object.objectName : component.errorString();
+    })()`,
+  });
+  if (fixture.error || fixture.result !== fixtureObjectName) {
+    throw new Error(`Could not create application card fixture: ${fixture.error || fixture.result}`);
+  }
 
   const name = await accessibleValue(
-    app, "appGridDelegate.logos_inspector_ui", "Accessible.name");
+    app, fixtureObjectName, "Accessible.name");
   if (name !== "Logos Inspector") {
     throw new Error(`Unexpected accessible card name: ${JSON.stringify(name)}`);
   }
 
   const roleMatches = await accessibleValue(
     app,
-    "appGridDelegate.logos_inspector_ui",
+    fixtureObjectName,
     "Accessible.role === Accessible.ListItem");
   if (roleMatches !== true) {
     throw new Error("Inspector application card is not exposed as a list item");
@@ -497,10 +521,18 @@ test("app manager: application cards expose identity and activation semantics", 
 
   const focusable = await accessibleValue(
     app,
-    "appGridDelegate.logos_inspector_ui",
+    fixtureObjectName,
     "Accessible.focusable");
   if (focusable !== true) {
     throw new Error("Inspector application card is not exposed as focusable");
+  }
+
+  const fixtureObject = await app.findByProperty("objectName", fixtureObjectName);
+  if (fixtureObject.matches?.length) {
+    await app.inspector.send("evaluate", {
+      objectId: fixtureObject.matches[0].id,
+      expression: "destroy()",
+    });
   }
 });
 
