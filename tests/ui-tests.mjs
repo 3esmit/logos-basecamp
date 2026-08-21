@@ -483,7 +483,7 @@ test("app manager: application cards expose identity and activation semantics", 
     objectId: overlay.matches[0].id,
     expression: `(function() {
       var component = Qt.createComponent(
-        "qrc:/qt/qml/Basecamp/AppManager/AppGridDelegate.qml");
+        "qrc:/qt/qml/Basecamp/AppManager/Basecamp/AppManager/AppGridDelegate.qml");
       var object = component.createObject(root, {
         objectName: ${JSON.stringify(fixtureObjectName)},
         width: 180,
