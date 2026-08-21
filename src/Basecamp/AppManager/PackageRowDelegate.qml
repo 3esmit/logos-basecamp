@@ -21,6 +21,8 @@ ItemDelegate {
         readonly property string rowName: root.appRow ? (root.appRow.name || "") : ""
         readonly property string rowDisplayName:
             root.appRow ? (root.appRow.displayName || root.appRow.name || "") : ""
+        readonly property string accessibleName:
+            d.rowDisplayName.length > 0 ? d.rowDisplayName : d.rowName
         readonly property string action:  root.appRow ? (root.appRow.action || "") : ""
         readonly property string toVersion: root.appRow ? (root.appRow.toVersion || "") : ""
         readonly property bool   isError:   d.action === "error"
@@ -38,6 +40,17 @@ ItemDelegate {
     hoverEnabled: true
     padding: 0
     autoExclusive: false
+    focusPolicy: Qt.StrongFocus
+    activeFocusOnTab: true
+    objectName: "packageRowDelegate." + d.rowName
+
+    Accessible.role: Accessible.ListItem
+    Accessible.name: d.accessibleName
+    Accessible.description: d.rowName.length > 0
+        ? qsTr("Package: %1").arg(d.rowName)
+        : ""
+    Accessible.focusable: true
+    Accessible.focused: root.activeFocus
 
     background: Rectangle {
         color: "transparent"
@@ -71,9 +84,12 @@ ItemDelegate {
             Layout.preferredHeight: 32
 
             LogosComboBox {
+                objectName: "packageRowDelegate.version." + d.rowName
                 anchors.fill: parent
                 visible: d.usableVersions.length > 0
                 enabled: !root.installing && !d.isError
+                Accessible.role: Accessible.ComboBox
+                Accessible.name: qsTr("Version for %1").arg(d.accessibleName)
                 // Catalog entries can have manifest: null; guard every access
                 // or v.manifest.version throws a QML TypeError and blanks the picker.
                 model: d.usableVersions.map(function(v) { return (v && v.manifest) ? (v.manifest.version || "") : "" })

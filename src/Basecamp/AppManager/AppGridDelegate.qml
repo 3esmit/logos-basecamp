@@ -36,6 +36,8 @@ ItemDelegate {
 
         readonly property string nameText:      root.appData ? (root.appData.name || "") : ""
         readonly property string displayName:   root.appData ? (root.appData.displayName || root.appData.name || "") : ""
+        readonly property string accessibleName:
+            d.displayName.length > 0 ? d.displayName : d.nameText
         readonly property string iconUrl:      root.appData ? (root.appData.iconUrl || "") : ""
         // 0.4.0+ guarantees a validated 256x256 icon, so it can fill the
         // tile. Older packages ship a small glyph that must stay inset.
@@ -67,6 +69,19 @@ ItemDelegate {
     background: Item {}
     padding: 0
     hoverEnabled: true
+    focusPolicy: Qt.StrongFocus
+    activeFocusOnTab: true
+    objectName: "appGridDelegate." + d.nameText
+
+    Accessible.role: Accessible.ListItem
+    Accessible.name: d.accessibleName
+    Accessible.description: d.nameText.length > 0
+        ? qsTr("Application package: %1").arg(d.nameText)
+        : ""
+    Accessible.focusable: true
+    Accessible.focused: root.activeFocus
+    Accessible.pressed: root.pressed
+    Accessible.onPressAction: root.clicked()
 
     onClicked: root.appClicked(d.nameText, d.repositoryUrl)
 
@@ -107,6 +122,7 @@ ItemDelegate {
                     dimOpacity: d.tileOpacity
                     insetArtwork: !d.fullBleedIcon
                     interactive: false
+                    Accessible.ignored: true
                 }
 
                 LogosBadge {
